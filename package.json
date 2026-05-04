@@ -1,0 +1,65 @@
+{
+    "name": "@fest-lib/image",
+    "description": "Image processing and analysis (fest-lib)",
+    "version": "0.1.0",
+    "license": "MIT",
+    "type": "module",
+    "sideEffects": true,
+    "engines": {
+        "node": ">=20"
+    },
+    "publishConfig": {
+        "access": "public"
+    },
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/fest-live/image.ts.git"
+    },
+    "bugs": {
+        "url": "https://github.com/fest-live/image.ts/issues"
+    },
+    "homepage": "https://github.com/fest-live/image.ts#readme",
+    "keywords": [
+        "fest",
+        "fest-lib",
+        "image",
+        "processing",
+        "analysis"
+    ],
+    "files": [
+        "dist",
+        "LICENSE"
+    ],
+    "main": "./dist/image.js",
+    "module": "./dist/image.js",
+    "exports": {
+        ".": {
+            "import": "./dist/image.js",
+            "default": "./dist/image.js"
+        },
+        "./package.json": "./package.json"
+    },
+    "dependencies": {
+        "culori": ">=2.1.1"
+    },
+    "scripts": {
+        "test": "vite --host 0.0.0.0",
+        "dev": "vite --host 0.0.0.0",
+        "watch": "vite build --watch",
+        "build": "vite build --config vite.config.js",
+        "build:publish": "FEST_NPM_IMPORTS=1 vite build --config vite.config.js",
+        "prepack": "npm run build:publish",
+        "preview": "vite preview",
+        "docs": "typedoc ./src/index.ts --options ./typedoc.json --out ./docs --tsconfig ./tsconfig.json --excludeExternals --excludePrivate --excludeProtected --skipErrorChecking",
+        "docs:clean": "rm -rf ./docs && typedoc --options ./typedoc.json",
+        "docs:md": "typedoc --options ./typedoc.md.json",
+        "docs:md:clean": "rm -rf ./docs-md && typedoc --options ./typedoc.md.json"
+    },
+    "devDependencies": {
+        "@types/node": ">=22.8.1",
+        "sass": ">=1.93.3",
+        "typescript": ">=6.0.0-beta",
+        "vite": "^8.0.7",
+        "vite-plugin-external": ">=6.2.2"
+    }
+}
