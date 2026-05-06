@@ -18,6 +18,8 @@ export type CanvasLayerState = {
 export const initializeAppCanvasLayer = (container: HTMLElement): CanvasLayerState => {
     const root = container;
     root.replaceChildren();
+    /* INVARIANT: {@link setAppWallpaper} queries `[data-app-layer="canvas"] canvas[is="ui-canvas"]`. */
+    root.dataset.appLayer = "canvas";
     root.style.position = "absolute";
     root.style.inset = "0";
     root.style.overflow = "hidden";
