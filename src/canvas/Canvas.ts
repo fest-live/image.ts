@@ -1,3 +1,9 @@
+/*
+ * Filename: Canvas.ts
+ * FullPath: modules/projects/image.ts/src/canvas/Canvas.ts
+ * Change date and time: 17.31.00_30.07.2026
+ * Reason for changes: Observe both `data-orient` and `orient`; fix 0-orient parse via Number.isFinite.
+ */
 import { makeRAFCycle } from "fest/dom";
 
 //
@@ -43,7 +49,8 @@ const bindCached = (cb, ctx)=>{
 let UICanvas: any = null;
 if (typeof HTMLCanvasElement != "undefined") {
     UICanvas = class UICanvas extends HTMLCanvasElement {
-        static observedAttributes = ["data-src", "data-orient"];
+        /* COMPAT: `fixOrientToScreen` / hosts may set `orient`; SpeedDial / Canvas-2 use `data-orient`. */
+        static observedAttributes = ["data-src", "data-orient", "orient"];
 
         //
         ctx: CanvasRenderingContext2D | null = null;
@@ -53,13 +60,21 @@ if (typeof HTMLCanvasElement != "undefined") {
         #ready: string | Blob | File = "";
 
         //
-        get #orient() { return parseInt(this.getAttribute("data-orient") || "0") || 0; }
-        set #orient(value: number) { this.setAttribute("data-orient", value.toString()); }
+        get #orient() {
+            const raw = this.getAttribute("data-orient") ?? this.getAttribute("orient") ?? "0";
+            const n = Number.parseInt(raw, 10);
+            return Number.isFinite(n) ? n : 0;
+        }
+        set #orient(value: number) {
+            const s = String(value);
+            this.setAttribute("data-orient", s);
+            this.setAttribute("orient", s);
+        }
 
         //
         attributeChangedCallback(name, _, newValue) {
             if (name == "data-src") { this.#preload(newValue); };
-            if (name == "data-orient") { this.#render(this.#ready); };
+            if (name == "data-orient" || name == "orient") { this.#render(this.#ready); };
         }
 
         //
@@ -72,6 +87,8 @@ if (typeof HTMLCanvasElement != "undefined") {
                 Math.min(Math.min(Math.max(this.clientHeight || parent?.clientHeight || 1, 1), parent?.clientHeight || 1) * (this.currentCSSZoom || 1), screen?.height || 1) * (devicePixelRatio || 1)
             ];
             this.#preload(this.#loading = this.dataset.src || this.#loading);
+            // WHY: late connect after orient attr was set before CE upgrade — force one paint pass.
+            if (this.image) this.#render(this.#ready);
         }
 
         //

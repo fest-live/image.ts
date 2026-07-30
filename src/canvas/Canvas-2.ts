@@ -1,10 +1,20 @@
+/*
+ * Filename: Canvas-2.ts
+ * FullPath: modules/projects/image.ts/src/canvas/Canvas-2.ts
+ * Change date and time: 17.30.00_30.07.2026
+ * Reason for changes: Sync wallpaper `data-orient` / `orient` with screen via whenAnyScreenChanges.
+ */
 /**
  * Underlying app canvas layer.
  *
  * Hosts background/image surface under shell windows.
  */
 
-import "fest/dom";
+import {
+    getCorrectOrientation,
+    orientationNumberMap,
+    whenAnyScreenChanges
+} from "fest/dom";
 
 const WALLPAPER_STORAGE_KEY = "rs-wallpaper-image";
 const DEFAULT_WALLPAPER_URL = "/assets/wallpaper.jpg";
@@ -13,6 +23,46 @@ export type CanvasLayerState = {
     root: HTMLElement;
     canvas: HTMLCanvasElement;
     glow: HTMLDivElement;
+    /** Stop screen/orient listeners for this canvas. */
+    disposeOrient?: () => void;
+};
+
+const currentOrientNumber = (): number =>
+    orientationNumberMap?.[getCorrectOrientation()] ?? 0;
+
+/**
+ * INVARIANT: `ui-canvas` cover-rotate reads `data-orient` (see Canvas.ts).
+ * Keep attr + CSS var in lockstep with {@link fixOrientToScreen} / `orientRef`.
+ */
+export const syncCanvasOrient = (canvas: HTMLCanvasElement): (() => void) => {
+    const apply = (): void => {
+        const n = currentOrientNumber();
+        const s = String(n);
+        if (canvas.getAttribute("data-orient") !== s) {
+            canvas.setAttribute("data-orient", s);
+        }
+        if (canvas.getAttribute("orient") !== s) {
+            canvas.setAttribute("orient", s);
+        }
+        canvas.style.setProperty("--orient", s);
+        (canvas as HTMLElement & { orient?: number }).orient = n;
+    };
+    apply();
+    return whenAnyScreenChanges(apply);
+};
+
+/** Re-apply orient on every live wallpaper canvas (e.g. after late mount). */
+export const syncAppWallpaperOrient = (): void => {
+    const canvases = document.querySelectorAll<HTMLCanvasElement>(
+        '[data-app-layer="canvas"] canvas[is="ui-canvas"], [data-app-layer="canvas"] canvas.ui-canvas'
+    );
+    canvases.forEach((canvas) => {
+        const n = currentOrientNumber();
+        const s = String(n);
+        canvas.setAttribute("data-orient", s);
+        canvas.setAttribute("orient", s);
+        canvas.style.setProperty("--orient", s);
+    });
 };
 
 export const initializeAppCanvasLayer = (container: HTMLElement): CanvasLayerState => {
@@ -35,7 +85,7 @@ export const initializeAppCanvasLayer = (container: HTMLElement): CanvasLayerSta
         "radial-gradient(circle at 15% 20%, rgba(145,185,255,0.45) 0%, transparent 40%), radial-gradient(circle at 75% 72%, rgba(91,134,235,0.35) 0%, transparent 43%)";
 
     const canvas = document.createElement("canvas", { is: "ui-canvas" }) as HTMLCanvasElement;
-    canvas.className = "app-canvas__image";
+    canvas.className = "app-canvas__image ui-canvas";
     canvas.style.position = "absolute";
     canvas.style.inset = "0";
     canvas.style.pointerEvents = "none";
@@ -51,8 +101,9 @@ export const initializeAppCanvasLayer = (container: HTMLElement): CanvasLayerSta
 
     const wallpaper = loadWallpaperUrl();
     canvas.setAttribute("data-src", wallpaper);
+    const disposeOrient = syncCanvasOrient(canvas);
 
-    return { root, canvas, glow };
+    return { root, canvas, glow, disposeOrient };
 };
 
 export const setAppWallpaper = (wallpaperUrl: string): void => {
@@ -63,8 +114,17 @@ export const setAppWallpaper = (wallpaperUrl: string): void => {
         // ignore storage errors
     }
 
-    const canvases = document.querySelectorAll<HTMLCanvasElement>('[data-app-layer="canvas"] canvas[is="ui-canvas"]');
-    canvases.forEach((canvas) => canvas.setAttribute("data-src", value));
+    const canvases = document.querySelectorAll<HTMLCanvasElement>(
+        '[data-app-layer="canvas"] canvas[is="ui-canvas"], [data-app-layer="canvas"] canvas.ui-canvas'
+    );
+    const orient = String(currentOrientNumber());
+    canvases.forEach((canvas) => {
+        canvas.setAttribute("data-src", value);
+        // WHY: src swap must not leave stale/missing orient (ui-canvas re-renders on both).
+        canvas.setAttribute("data-orient", orient);
+        canvas.setAttribute("orient", orient);
+        canvas.style.setProperty("--orient", orient);
+    });
 };
 
 const loadWallpaperUrl = (): string => {
