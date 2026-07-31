@@ -1,8 +1,8 @@
 /*
  * Filename: Canvas-2.ts
  * FullPath: modules/projects/image.ts/src/canvas/Canvas-2.ts
- * Change date and time: 17.30.00_30.07.2026
- * Reason for changes: Sync wallpaper `data-orient` / `orient` with screen via whenAnyScreenChanges.
+ * Change date and time: 16.40.00_31.07.2026
+ * Reason for changes: Apply wallpaper-derived theme seeds after paint URL changes.
  */
 /**
  * Underlying app canvas layer.
@@ -15,6 +15,10 @@ import {
     orientationNumberMap,
     whenAnyScreenChanges
 } from "fest/dom";
+import {
+    applyThemeFromWallpaper,
+    restoreWallpaperThemeCache
+} from "../engine/WallpaperTheme.js";
 
 const WALLPAPER_STORAGE_KEY = "rs-wallpaper-image";
 const DEFAULT_WALLPAPER_URL = "/assets/wallpaper.jpg";
@@ -65,6 +69,16 @@ export const syncAppWallpaperOrient = (): void => {
     });
 };
 
+/** Tint the soft glow with the wallpaper primary (falls back to cool blue). */
+const syncGlowToTheme = (glow: HTMLElement): void => {
+    const primary =
+        getComputedStyle(document.documentElement).getPropertyValue("--color-primary").trim() ||
+        "#5b86eb";
+    glow.style.background =
+        `radial-gradient(circle at 15% 20%, color-mix(in oklab, ${primary} 45%, transparent) 0%, transparent 40%),` +
+        ` radial-gradient(circle at 75% 72%, color-mix(in oklab, ${primary} 35%, transparent) 0%, transparent 43%)`;
+};
+
 export const initializeAppCanvasLayer = (container: HTMLElement): CanvasLayerState => {
     const root = container;
     root.replaceChildren();
@@ -103,6 +117,11 @@ export const initializeAppCanvasLayer = (container: HTMLElement): CanvasLayerSta
     canvas.setAttribute("data-src", wallpaper);
     const disposeOrient = syncCanvasOrient(canvas);
 
+    /* Cold paint: restore last seeds, then re-extract from current wallpaper. */
+    restoreWallpaperThemeCache();
+    syncGlowToTheme(glow);
+    void applyThemeFromWallpaper(wallpaper).then(() => syncGlowToTheme(glow));
+
     return { root, canvas, glow, disposeOrient };
 };
 
@@ -124,6 +143,10 @@ export const setAppWallpaper = (wallpaperUrl: string): void => {
         canvas.setAttribute("data-orient", orient);
         canvas.setAttribute("orient", orient);
         canvas.style.setProperty("--orient", orient);
+    });
+
+    void applyThemeFromWallpaper(value, { force: true }).then(() => {
+        document.querySelectorAll<HTMLElement>(".app-canvas__glow").forEach(syncGlowToTheme);
     });
 };
 
