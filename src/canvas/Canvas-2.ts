@@ -324,9 +324,13 @@ export const initializeAppCanvasLayer = (container: HTMLElement): CanvasLayerSta
     canvas.style.blockSize = "100%";
     canvas.style.maxInlineSize = "100%";
     canvas.style.maxBlockSize = "100%";
-    canvas.style.opacity = "0.88";
+    canvas.style.opacity = "1";
     canvas.style.mixBlendMode = "normal";
     canvas.setAttribute("is", "ui-canvas");
+    canvas.style.setProperty("dynamic-range-limit", "no-limit");
+    canvas.style.setProperty("color-space", "display-p3");
+    canvas.style.setProperty("background-color", "black", "important");
+    canvas.style.setProperty("opacity", "1", "important");
 
     root.append(glow, canvas);
 

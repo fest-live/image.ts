@@ -119,8 +119,11 @@ if (typeof HTMLCanvasElement != "undefined") {
                     alpha: true,
                     desynchronized: true,
                     powerPreference: "high-performance",
-                    preserveDrawingBuffer: true
+                    preserveDrawingBuffer: true,
+                    colorSpace: "rec2100-hlg"
                 }) as CanvasRenderingContext2D;
+                this.ctx?.configureHighDynamicRange?.({ mode: "extended" });
+                canvas?.configureHighDynamicRange?.({ mode: "extended" });
 
                 //
                 this.inert = true;
@@ -133,6 +136,10 @@ if (typeof HTMLCanvasElement != "undefined") {
                 //
                 this.style.setProperty("max-inline-size", "min(100%, min(100cqi, 100dvi))");
                 this.style.setProperty("max-block-size", "min(100%, min(100cqb, 100dvb))");
+                this.style.setProperty("dynamic-range-limit", "no-limit");
+                this.style.setProperty("color-space", "display-p3");
+                this.style.setProperty("background-color", "black", "important");
+                this.style.setProperty("opacity", "1", "important");
 
                 //
                 fixSize();
