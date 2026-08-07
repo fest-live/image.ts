@@ -19,7 +19,7 @@ import {
     getCorrectOrientation,
     orientationNumberMap,
     whenAnyScreenChanges
-} from "fest/dom";
+} from "@fest-lib/dom";
 import {
     applyThemeFromWallpaper,
     restoreWallpaperThemeCache

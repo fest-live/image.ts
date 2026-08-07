@@ -4,7 +4,7 @@
  * Change date and time: 17.31.00_30.07.2026
  * Reason for changes: Observe both `data-orient` and `orient`; fix 0-orient parse via Number.isFinite.
  */
-import { makeRAFCycle } from "fest/dom";
+import { makeRAFCycle } from "@fest-lib/dom";
 
 //
 const blobImageMap = new WeakMap(), delayed = new Map<number, Function | null>([]);
