@@ -71,10 +71,14 @@ export const createImageBitmapCache = (blob)=>{
 }
 
 //
-const bindCache = new WeakMap();
+const bindCacheSymbol = Symbol.for("image.canvas.bindCache");
+globalThis[bindCacheSymbol] ??= new WeakMap();
+export const bindCache = globalThis[bindCacheSymbol];
+
+//
 const bindCached = (cb, ctx)=>{
     // @ts-ignore
-    return bindCache?.getOrInsertComputed?.(cb, ()=> cb?.bind?.(ctx));
+    return bindCache?.get?.(cb) ?? bindCache?.set?.(cb, cb?.bind?.(ctx)) ?? cb?.bind?.(ctx);
 }
 
 //
