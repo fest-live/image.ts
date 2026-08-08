@@ -1,8 +1,8 @@
 /*
  * Filename: Canvas.ts
  * FullPath: modules/projects/image.ts/src/canvas/Canvas.ts
- * Change date and time: 17.31.00_30.07.2026
- * Reason for changes: Observe both `data-orient` and `orient`; fix 0-orient parse via Number.isFinite.
+ * Change date and time: 12.05.00_08.08.2026
+ * Reason for changes: Fall back when getContext colorSpace `rec2100-hlg` is unsupported (Chrome throws; wallpaper never paints).
  */
 import { makeRAFCycle } from "@fest-lib/dom";
 
@@ -20,6 +20,33 @@ const getImgHeight = (img)=>{
     return img?.naturalHeight || img?.height || 1;
 }
 
+/**
+ * WHY: Chromium often rejects `rec2100-hlg` / `rec2100-pq` as PredefinedColorSpace.
+ * A bare throw aborts ui-canvas init (no ctx, no ResizeObserver) → blank wallpaper.
+ * INVARIANT: always return a usable 2d context when the browser allows any.
+ */
+const create2dContext = (canvas: HTMLCanvasElement): CanvasRenderingContext2D | null => {
+    const base: CanvasRenderingContext2DSettings = {
+        alpha: true,
+        desynchronized: true,
+        powerPreference: "high-performance",
+        preserveDrawingBuffer: true,
+    };
+    for (const colorSpace of ["rec2100-hlg", "display-p3", "srgb"] as const) {
+        try {
+            const ctx = canvas.getContext("2d", { ...base, colorSpace });
+            if (ctx) return ctx;
+        } catch {
+            /* unsupported colorSpace enum */
+        }
+    }
+    try {
+        return canvas.getContext("2d", base);
+    } catch {
+        return canvas.getContext("2d");
+    }
+};
+
 //
 export const callByFrame = (pointerId, cb)=>{ delayed.set(pointerId, cb); }
 export const cover = (ctx, img, scale = 1, port, orient = 0) => {
@@ -33,7 +60,12 @@ export const cover = (ctx, img, scale = 1, port, orient = 0) => {
 //
 export const createImageBitmapCache = (blob)=>{
     if (!blobImageMap.has(blob) && (blob instanceof Blob || blob instanceof File || blob instanceof OffscreenCanvas || blob instanceof ImageBitmap || blob instanceof Image)) {
-        blobImageMap.set(blob, createImageBitmap(blob));
+        // WHY: do not cache a rejected promise forever — first decode race would stick.
+        const pending = createImageBitmap(blob).catch((err) => {
+            blobImageMap.delete(blob);
+            throw err;
+        });
+        blobImageMap.set(blob, pending);
     }
     return blobImageMap.get(blob);
 }
@@ -115,15 +147,13 @@ if (typeof HTMLCanvasElement != "undefined") {
 
             //
             sheduler?.shedule?.(() => {
-                this.ctx = canvas.getContext("2d", {
-                    alpha: true,
-                    desynchronized: true,
-                    powerPreference: "high-performance",
-                    preserveDrawingBuffer: true,
-                    colorSpace: "rec2100-hlg"
-                }) as CanvasRenderingContext2D;
-                this.ctx?.configureHighDynamicRange?.({ mode: "extended" });
-                canvas?.configureHighDynamicRange?.({ mode: "extended" });
+                this.ctx = create2dContext(canvas);
+                try {
+                    this.ctx?.configureHighDynamicRange?.({ mode: "extended" });
+                    canvas?.configureHighDynamicRange?.({ mode: "extended" });
+                } catch {
+                    /* HDR optional */
+                }
 
                 //
                 this.inert = true;
