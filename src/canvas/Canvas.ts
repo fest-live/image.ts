@@ -1,8 +1,8 @@
 /*
  * Filename: Canvas.ts
  * FullPath: modules/projects/image.ts/src/canvas/Canvas.ts
- * Change date and time: 12.05.00_08.08.2026
- * Reason for changes: Fall back when getContext colorSpace `rec2100-hlg` is unsupported (Chrome throws; wallpaper never paints).
+ * Change date and time: 16.30.00_08.08.2026
+ * Reason for changes: Fix bindCached — WeakMap.set returns the map, so first #render scheduled a non-function (wallpaper blank until resize).
  */
 import { makeRAFCycle } from "@fest-lib/dom";
 
@@ -75,11 +75,17 @@ const bindCacheSymbol = Symbol.for("image.canvas.bindCache");
 globalThis[bindCacheSymbol] ??= new WeakMap();
 export const bindCache = globalThis[bindCacheSymbol];
 
-//
-const bindCached = (cb, ctx)=>{
-    // @ts-ignore
-    return bindCache?.get?.(cb) ?? bindCache?.set?.(cb, cb?.bind?.(ctx)) ?? cb?.bind?.(ctx);
-}
+/**
+ * WHY: `WeakMap.set` returns the map, not the value — `get() ?? set() ?? bind()` used to
+ * schedule the WeakMap itself on the first paint (blank wallpaper until a later #render).
+ */
+const bindCached = (cb, ctx) => {
+    const cached = bindCache.get(cb);
+    if (typeof cached === "function") return cached;
+    const bound = cb.bind(ctx);
+    bindCache.set(cb, bound);
+    return bound;
+};
 
 //
 let UICanvas: any = null;
@@ -195,8 +201,9 @@ if (typeof HTMLCanvasElement != "undefined") {
                     }
                 }).observe(this, { box: "device-pixel-content-box" });
 
-                //
+                // WHY: data-src / connectedCallback may have finished preload before ctx existed.
                 this.#preload(this.#loading = this.dataset.src || this.#loading);
+                if (this.image) this.#render(this.#ready || this.#loading);
             });
         }
 
