@@ -220,6 +220,14 @@ export const syncAppWallpaperOrient = (): void => {
     });
 };
 
+/** Re-resolve storage/IDB pointer and repaint — after HOME/back or WebView resume. */
+export const refreshAppWallpaperPaint = (): void => {
+    void resolveAppWallpaperUrl().then((url) => {
+        paintWallpaperOnCanvases(url);
+        syncAppWallpaperOrient();
+    });
+};
+
 /** Tint the soft glow with the wallpaper primary (falls back to cool blue). */
 const syncGlowToTheme = (glow: HTMLElement): void => {
     const primary =
