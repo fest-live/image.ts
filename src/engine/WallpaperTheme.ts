@@ -129,7 +129,22 @@ export const themeHosts = (): HTMLElement[] => {
     return [...nodes];
 };
 
+const wallpaperSeedsMayPaint = (): boolean => {
+    if (typeof document === "undefined") return true;
+    const src = String(document.documentElement.dataset.colorSource || "");
+    if (!src) return true;
+    return src === "wallpaper" || src === "speed-dial" || src === "system-wallpaper";
+};
+
 export const applyWallpaperThemeSeeds = (seeds: WallpaperThemeSeeds): void => {
+    try {
+        localStorage.setItem(THEME_STORAGE_KEY, JSON.stringify(seeds));
+        localStorage.setItem(PRIMARY_STORAGE_KEY, seeds.primary);
+    } catch {
+        /* ignore quota / private mode */
+    }
+    /* WHY: Material You / custom must keep `--base-color`; cache extract for later. */
+    if (!wallpaperSeedsMayPaint()) return;
     for (const host of themeHosts()) {
         for (const [prop, key] of SEED_PROPS) {
             host.style.setProperty(prop, seeds[key]);
@@ -138,7 +153,7 @@ export const applyWallpaperThemeSeeds = (seeds: WallpaperThemeSeeds): void => {
     /* Late-mounted views inherit :root; stamp open roots for shadow isolation. */
     document
         .querySelectorAll<HTMLElement>(
-            ".view-explorer, [data-view='explorer'], .view-viewer, [data-view='viewer'], .view-settings, [data-view='settings']"
+            ".view-explorer, [data-view='explorer'], .view-viewer, [data-view='viewer'], .view-settings, [data-view='settings'], .cw-network-view, .cw-network-view-host"
         )
         .forEach((el) => {
             el.style.setProperty("--color-primary", seeds.primary);
@@ -146,12 +161,6 @@ export const applyWallpaperThemeSeeds = (seeds: WallpaperThemeSeeds): void => {
             el.style.setProperty("--color-secondary", seeds.secondary);
             el.style.setProperty("--color-tertiary", seeds.tertiary);
         });
-    try {
-        localStorage.setItem(THEME_STORAGE_KEY, JSON.stringify(seeds));
-        localStorage.setItem(PRIMARY_STORAGE_KEY, seeds.primary);
-    } catch {
-        /* ignore quota / private mode */
-    }
     document.dispatchEvent(
         new CustomEvent("u2-theme-change", { detail: { source: "wallpaper", seeds } })
     );
