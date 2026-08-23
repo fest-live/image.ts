@@ -1,14 +1,16 @@
 /*
  * Filename: Canvas.ts
  * FullPath: modules/projects/image.ts/src/canvas/Canvas.ts
- * Change date and time: 16.30.00_08.08.2026
- * Reason for changes: Fix bindCached — WeakMap.set returns the map, so first #render scheduled a non-function (wallpaper blank until resize).
+ * Change date and time: 23.10.00_23.08.2026
+ * Reason for changes: Skip 404 wallpaper fetch/decode — CRX missing /assets/wallpaper.jpg threw on open.
  */
 import { makeRAFCycle } from "@fest-lib/dom";
 
 //
 const blobImageMap = new WeakMap(), delayed = new Map<number, Function | null>([]);
 const sheduler = makeRAFCycle();
+/** PERF: CRX often has no /assets/wallpaper.jpg — do not refetch/decode a known miss. */
+const failedWallpaperSrc = new Set<string>();
 
 //
 const getImgWidth = (img)=>{
@@ -244,11 +246,30 @@ if (typeof HTMLCanvasElement != "undefined") {
 
         //
         #preload(src) {
-            const ready = src || this.#loading; this.#loading = ready; return fetch(src, {
-            cache: "force-cache",
-            mode: "same-origin",
-            priority: "high",
-        })?.then?.(async (rsp) => this.$useImageAsSource(await rsp.blob(), ready)?.catch(console.warn.bind(console)))?.catch?.(console.warn.bind(console)); }
+            const ready = src || this.#loading;
+            this.#loading = ready;
+            if (!ready || typeof ready !== "string") return Promise.resolve();
+            if (failedWallpaperSrc.has(ready)) return Promise.resolve();
+            return fetch(ready, {
+                cache: "force-cache",
+                mode: "same-origin",
+            })?.then?.(async (rsp) => {
+                if (!rsp.ok) {
+                    failedWallpaperSrc.add(ready);
+                    return;
+                }
+                const blob = await rsp.blob();
+                if (!blob?.size || (blob.type && !blob.type.startsWith("image/"))) {
+                    failedWallpaperSrc.add(ready);
+                    return;
+                }
+                return this.$useImageAsSource(blob, ready)?.catch?.(() => {
+                    failedWallpaperSrc.add(ready);
+                });
+            })?.catch?.(() => {
+                failedWallpaperSrc.add(ready);
+            });
+        }
         #render(whatIsReady?: File | Blob | string) {
             const ctx = this.ctx, img = this.image;
             if (img && ctx && (whatIsReady == this.#loading || !whatIsReady)) { sheduler?.shedule?.(bindCached(this.$renderPass, this)); }
