@@ -233,9 +233,11 @@ const syncGlowToTheme = (glow: HTMLElement): void => {
     const primary =
         getComputedStyle(document.documentElement).getPropertyValue("--color-primary").trim() ||
         "#5b86eb";
-    glow.style.background =
+    /*glow.style.background =
         `radial-gradient(circle at 15% 20%, color-mix(in oklab, ${primary} 45%, transparent) 0%, transparent 40%),` +
-        ` radial-gradient(circle at 75% 72%, color-mix(in oklab, ${primary} 35%, transparent) 0%, transparent 43%)`;
+        ` radial-gradient(circle at 75% 72%, color-mix(in oklab, ${primary} 35%, transparent) 0%, transparent 43%)`;*/
+    glow.style.background = "none";
+    glow.style.backgroundColor = "transparent";
 };
 
 const paintWallpaperOnCanvases = (paintUrl: string): void => {
@@ -312,7 +314,9 @@ export const initializeAppCanvasLayer = (container: HTMLElement): CanvasLayerSta
     root.style.position = "absolute";
     root.style.inset = "0";
     root.style.overflow = "hidden";
-    root.style.background = "radial-gradient(circle at 18% 12%, #1b2a45 0%, #0f1728 42%, #060910 100%)";
+    root.style.background = "none";
+    root.style.backgroundColor = "transparent";
+    //root.style.background = "radial-gradient(circle at 18% 12%, #1b2a45 0%, #0f1728 42%, #060910 100%)";
 
     const glow = document.createElement("div");
     glow.className = "app-canvas__glow";
@@ -320,8 +324,10 @@ export const initializeAppCanvasLayer = (container: HTMLElement): CanvasLayerSta
     glow.style.inset = "-20%";
     glow.style.pointerEvents = "none";
     glow.style.opacity = "0.7";
-    glow.style.background =
-        "radial-gradient(circle at 15% 20%, rgba(145,185,255,0.45) 0%, transparent 40%), radial-gradient(circle at 75% 72%, rgba(91,134,235,0.35) 0%, transparent 43%)";
+    glow.style.background = "none";
+    glow.style.backgroundColor = "transparent";
+    /*glow.style.background =
+        "radial-gradient(circle at 15% 20%, rgba(145,185,255,0.45) 0%, transparent 40%), radial-gradient(circle at 75% 72%, rgba(91,134,235,0.35) 0%, transparent 43%)";*/
 
     const canvas = document.createElement("canvas", { is: "ui-canvas" }) as HTMLCanvasElement;
     canvas.className = "app-canvas__image ui-canvas";
@@ -337,7 +343,7 @@ export const initializeAppCanvasLayer = (container: HTMLElement): CanvasLayerSta
     canvas.setAttribute("is", "ui-canvas");
     canvas.style.setProperty("dynamic-range-limit", "no-limit");
     canvas.style.setProperty("color-space", "display-p3");
-    canvas.style.setProperty("background-color", "black", "important");
+    canvas.style.setProperty("background-color", "transparent", "important");
     canvas.style.setProperty("opacity", "1", "important");
 
     root.append(glow, canvas);

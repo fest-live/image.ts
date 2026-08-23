@@ -180,7 +180,7 @@ if (typeof HTMLCanvasElement != "undefined") {
                 this.style.setProperty("max-block-size", "min(100%, min(100cqb, 100dvb))");
                 this.style.setProperty("dynamic-range-limit", "no-limit");
                 this.style.setProperty("color-space", "display-p3");
-                this.style.setProperty("background-color", "black", "important");
+                this.style.setProperty("background-color", "transparent", "important");
                 this.style.setProperty("opacity", "1", "important");
 
                 //
