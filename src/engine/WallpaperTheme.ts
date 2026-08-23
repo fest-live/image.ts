@@ -1,8 +1,8 @@
 /*
  * Filename: WallpaperTheme.ts
  * FullPath: modules/projects/image.ts/src/engine/WallpaperTheme.ts
- * Change date and time: 15.35.00_23.08.2026
- * Reason for changes: Wallpaper paper + contrast tokens alongside --base-color seeds.
+ * Change date and time: 17.50.00_23.08.2026
+ * Reason for changes: Live luma paper wins over KMeans/cache (light wallpaper ink revert).
  * FIND:wallpaper-ink
  * TAG:wallpaper-ink,veela,image
  */
@@ -45,6 +45,12 @@ const FALLBACK_PAPER: WallpaperPaperTokens = {
     underlying: "#16161a",
     contrast: "#f7f7f8",
 };
+
+/** Last paper from a real photo luma — KMeans/cache must not flip it back to white ink. */
+let lastLivePaper: WallpaperPaperTokens | null = null;
+
+/** Cleared WebGL/resize frames sit near 0; a real black photo is still > this. */
+const USABLE_LUMA_MIN = 0.03;
 
 /** Token names written onto theme hosts (veela / wf-demo / ui-window). */
 const SEED_PROPS = [
@@ -95,24 +101,84 @@ const haloForPaper = (darkPaper: boolean): { shadow: string; glow: string } =>
         ? { shadow: "rgb(0 0 0 / 0.88)", glow: "rgb(0 0 0 / 0.45)" }
         : { shadow: "rgb(255 255 255 / 0.72)", glow: "rgb(255 255 255 / 0.35)" };
 
+const isUsablePaperLuma = (luma: number): boolean =>
+    Number.isFinite(luma) && luma >= USABLE_LUMA_MIN && luma <= 1;
+
 /**
  * WHY: Paper is the wallpaper's non-chromatic base (dark vs light photo), not the accent seed.
- * Lowest-chroma centroid + mean L, then destaturate — keeps wood/sky paper without nebula teal.
+ * Polarity comes from pixel luma (or brighter-of mean/median centroids). Lowest-chroma is hue
+ * only — a black speck must not outvote a light sky (that stamped white ink after a correct flash).
  */
-const deriveWallpaperPaperTokensFromSamples = (samples: OklchSample[]): WallpaperPaperTokens => {
-    if (!samples.length) return { ...FALLBACK_PAPER };
-    const meanL = samples.reduce((sum, s) => sum + s.l, 0) / samples.length;
-    const paper = [...samples].sort(
-        (a, b) => a.c - b.c || Math.abs(a.l - meanL) - Math.abs(b.l - meanL)
-    )[0]!;
-    const paperL = clamp(paper.l * 0.35 + meanL * 0.65, 0.08, 0.94);
-    const paperC = Math.min(PAPER_CHROMA_CAP, Math.max(0, paper.c * 0.2));
-    const h = paper.h || 0;
+const deriveWallpaperPaperTokensFromSamples = (
+    samples: OklchSample[],
+    pixelLuma?: number
+): WallpaperPaperTokens => {
+    if (!samples.length && pixelLuma == null) return { ...FALLBACK_PAPER };
+    const ls = samples.map((s) => s.l).sort((a, b) => a - b);
+    const meanL = samples.length
+        ? samples.reduce((sum, s) => sum + s.l, 0) / samples.length
+        : (pixelLuma as number);
+    const medianL = ls.length ? ls[Math.floor(ls.length / 2)]! : meanL;
+    const paperL = clamp(
+        pixelLuma != null && isUsablePaperLuma(pixelLuma) ? pixelLuma : Math.max(meanL, medianL),
+        0.08,
+        0.94
+    );
+    const paper = samples.length
+        ? [...samples].sort(
+              (a, b) => a.c - b.c || Math.abs(a.l - paperL) - Math.abs(b.l - paperL)
+          )[0]!
+        : null;
+    const paperC = paper ? Math.min(PAPER_CHROMA_CAP, Math.max(0, paper.c * 0.2)) : 0;
+    const h = paper?.h || 0;
     const darkPaper = paperL < PAPER_L_SPLIT;
     return {
         underlying: hexOklch(paperL, paperC, h, darkPaper ? FALLBACK_PAPER.underlying : "#e8e6e2"),
         contrast: hexOklch(darkPaper ? 0.93 : 0.16, 0.008, h, darkPaper ? FALLBACK_PAPER.contrast : "#141416"),
     };
+};
+
+/** Tiny downsample — same polarity as the statusbar canvas probe, without KMeans. */
+const sampleImageMeanLuma = async (imgURL: string | Blob | File): Promise<number | null> => {
+    try {
+        const blob = imgURL instanceof Blob ? imgURL : await (await fetch(imgURL)).blob();
+        if (!blob || blob.size <= 0) return null;
+        const bitmap = await createImageBitmap(blob);
+        const w = 48;
+        const h = Math.max(1, Math.round((bitmap.height / Math.max(1, bitmap.width)) * w));
+        const canvas =
+            typeof OffscreenCanvas !== "undefined"
+                ? new OffscreenCanvas(w, h)
+                : Object.assign(document.createElement("canvas"), { width: w, height: h });
+        if (!(canvas instanceof OffscreenCanvas)) {
+            canvas.width = w;
+            canvas.height = h;
+        }
+        const ctx = canvas.getContext("2d");
+        if (!ctx) {
+            bitmap.close?.();
+            return null;
+        }
+        ctx.drawImage(bitmap, 0, 0, w, h);
+        bitmap.close?.();
+        const data = ctx.getImageData(0, 0, w, h).data;
+        let sum = 0;
+        let n = 0;
+        for (let i = 0; i < data.length; i += 16) {
+            const a = data[i + 3] ?? 255;
+            if (a < 16) continue;
+            const r = data[i]! / 255;
+            const g = data[i + 1]! / 255;
+            const b = data[i + 2]! / 255;
+            sum += 0.2126 * r + 0.7152 * g + 0.0722 * b;
+            n++;
+        }
+        if (n < 8) return null;
+        const luma = sum / n;
+        return isUsablePaperLuma(luma) ? luma : null;
+    } catch {
+        return null;
+    }
 };
 
 /** Fast luma path (statusbar canvas probe) — same token names as KMeans paper. */
@@ -130,7 +196,10 @@ const hasWallpaperPaper = (seeds: WallpaperThemeSeeds): seeds is WallpaperThemeS
  * WHY: Hue-sorted KMeans often puts near-black first; UI accents need mid-L high-chroma
  * (nebula teal) as primary, then distinct secondary/tertiary clusters.
  */
-export const rankWallpaperSeeds = (centroids: RgbTuple[]): WallpaperThemeSeeds | null => {
+export const rankWallpaperSeeds = (
+    centroids: RgbTuple[],
+    pixelLuma?: number
+): WallpaperThemeSeeds | null => {
     const samples = centroids.map(rgbToSample).filter(Boolean) as OklchSample[];
     if (!samples.length) return null;
 
@@ -174,7 +243,7 @@ export const rankWallpaperSeeds = (centroids: RgbTuple[]): WallpaperThemeSeeds |
 
     const secondary = pickNext([primary]);
     const tertiary = pickNext([primary, secondary]);
-    const paper = deriveWallpaperPaperTokensFromSamples(samples);
+    const paper = deriveWallpaperPaperTokensFromSamples(samples, pixelLuma);
 
     return {
         primary: primary.hex,
@@ -222,18 +291,42 @@ export const applyWallpaperPaperTokens = (
     }
 };
 
-/** Early paint from canvas luma — same names KMeans overwrites. */
+const persistLivePaper = (paper: WallpaperPaperTokens): void => {
+    try {
+        const cached = loadCachedWallpaperTheme();
+        if (!cached) return;
+        localStorage.setItem(
+            THEME_STORAGE_KEY,
+            JSON.stringify({ ...cached, underlying: paper.underlying, contrast: paper.contrast })
+        );
+    } catch {
+        /* ignore quota / private mode */
+    }
+};
+
+/** Early paint from canvas luma — KMeans/cache may not overwrite this polarity. */
 export const applyWallpaperPaperFromLuma = (
     luma: number,
     extraHosts: Iterable<HTMLElement> = []
 ): WallpaperPaperTokens => {
+    if (!isUsablePaperLuma(luma)) {
+        if (lastLivePaper) {
+            applyWallpaperPaperTokens(lastLivePaper, extraHosts);
+            return lastLivePaper;
+        }
+        /* WHY: empty/cleared buffer — do not stamp FALLBACK white ink over a light photo. */
+        return { ...FALLBACK_PAPER };
+    }
     const paper = deriveWallpaperPaperTokensFromLuma(luma);
+    lastLivePaper = paper;
     applyWallpaperPaperTokens(paper, extraHosts);
+    persistLivePaper(paper);
     return paper;
 };
 
 export const applyWallpaperThemeSeeds = (seeds: WallpaperThemeSeeds): void => {
-    const next = seeds;
+    /* INVARIANT: live photo luma wins paper/ink; seeds still own Material You accents. */
+    const next = lastLivePaper ? { ...seeds, ...lastLivePaper } : seeds;
     try {
         localStorage.setItem(THEME_STORAGE_KEY, JSON.stringify(next));
         localStorage.setItem(PRIMARY_STORAGE_KEY, next.primary);
@@ -290,13 +383,16 @@ export const applyThemeFromWallpaper = async (
             ? imgURL.slice(0, 2048)
             : `blob:${(imgURL as File).name || "wallpaper"}:${(imgURL as Blob).size}`;
 
+    const liveLuma = await sampleImageMeanLuma(imgURL);
+    if (liveLuma != null) applyWallpaperPaperFromLuma(liveLuma);
+
     if (!opts?.force) {
         try {
             if (localStorage.getItem(WALLPAPER_URL_KEY) === srcKey) {
                 const cached = loadCachedWallpaperTheme();
                 if (cached) {
                     applyWallpaperThemeSeeds(cached);
-                    return cached;
+                    return lastLivePaper ? { ...cached, ...lastLivePaper } : cached;
                 }
             }
         } catch {
@@ -306,7 +402,7 @@ export const applyThemeFromWallpaper = async (
 
     try {
         const centroids = (await getDominantColors(imgURL)) as RgbTuple[];
-        const seeds = rankWallpaperSeeds(centroids);
+        const seeds = rankWallpaperSeeds(centroids, liveLuma ?? undefined);
         if (!seeds) return null;
         applyWallpaperThemeSeeds(seeds);
         try {
@@ -314,7 +410,7 @@ export const applyThemeFromWallpaper = async (
         } catch {
             /* ignore */
         }
-        return seeds;
+        return lastLivePaper ? { ...seeds, ...lastLivePaper } : seeds;
     } catch (err) {
         console.warn("[fest/image] applyThemeFromWallpaper failed", err);
         const cached = loadCachedWallpaperTheme();
