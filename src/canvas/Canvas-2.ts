@@ -1,8 +1,10 @@
 /*
  * Filename: Canvas-2.ts
  * FullPath: modules/projects/image.ts/src/canvas/Canvas-2.ts
- * Change date and time: 10.45.00_02.08.2026
- * Reason for changes: Persist wallpapers via IndexedDB — localStorage quota silently kept the old image.
+ * Change date and time: 23.35.00_29.08.2026
+ * Reason for changes: Never paint/theme from a persisted blob: URL — they die on reload.
+ * FIND:wallpaper-ink
+ * TAG:wallpaper-ink,image
  */
 /**
  * Underlying app canvas layer.
@@ -13,6 +15,8 @@
  * swallowed, paint updated in-memory only — reload restored the previous URL.
  * INVARIANT: durable custom wallpapers live in IndexedDB; `localStorage` holds
  * either a short URL (`/assets/…`) or the {@link WALLPAPER_IDB_MARKER} pointer.
+ * INVARIANT: `blob:` object URLs are session-only. Never persist them; never
+ * pass a stored `blob:` to `fetch` / KMeans (`ERR_FILE_NOT_FOUND` after reload).
  */
 
 import {
@@ -44,11 +48,22 @@ export type CanvasLayerState = {
 };
 
 let liveObjectUrl: string | null = null;
+/** Bumped on revoke so an in-flight IDB restore cannot resurrect a dead object URL. */
+let wallpaperEpoch = 0;
 
 const currentOrientNumber = (): number =>
     orientationNumberMap?.[getCorrectOrientation()] ?? 0;
 
+const isIdbPointer = (pointer: string): boolean =>
+    pointer === WALLPAPER_IDB_MARKER || pointer.startsWith("idb:");
+
+/** Stored `blob:` is always dead after reload; oversized `data:` is a quota leftover. */
+const isUnusableStoredUrl = (pointer: string): boolean =>
+    pointer.startsWith("blob:") ||
+    (pointer.startsWith("data:") && pointer.length > LOCAL_STORAGE_SAFE_CHARS);
+
 const revokeLiveObjectUrl = (): void => {
+    wallpaperEpoch += 1;
     if (liveObjectUrl && liveObjectUrl.startsWith("blob:")) {
         try {
             URL.revokeObjectURL(liveObjectUrl);
@@ -57,6 +72,14 @@ const revokeLiveObjectUrl = (): void => {
         }
     }
     liveObjectUrl = null;
+};
+
+/** Reuse this session's object URL so a second resolve cannot revoke mid-theme-fetch. */
+const adoptWallpaperBlob = (blob: Blob, epoch: number): string | null => {
+    if (epoch !== wallpaperEpoch) return liveObjectUrl;
+    if (liveObjectUrl) return liveObjectUrl;
+    liveObjectUrl = URL.createObjectURL(blob);
+    return liveObjectUrl;
 };
 
 const openWallpaperDb = (): Promise<IDBDatabase> =>
@@ -135,11 +158,28 @@ const readStoragePointer = (): string => {
 };
 
 const writeStoragePointer = (value: string): boolean => {
+    if (value.startsWith("blob:")) {
+        /* INVARIANT: blob: dies on reload — never persist as the pointer. */
+        return false;
+    }
     try {
         localStorage.setItem(WALLPAPER_STORAGE_KEY, value);
         return true;
     } catch {
         return false;
+    }
+};
+
+const restoreWallpaperBlobUrl = async (): Promise<string | null> => {
+    if (liveObjectUrl) return liveObjectUrl;
+    const epoch = wallpaperEpoch;
+    try {
+        const blob = await idbGetWallpaper();
+        if (!blob) return null;
+        return adoptWallpaperBlob(blob, epoch);
+    } catch (err) {
+        console.warn("[fest/image] wallpaper IDB restore failed", err);
+        return null;
     }
 };
 
@@ -152,32 +192,13 @@ const isInlinePayload = (url: string): boolean =>
  */
 export const resolveAppWallpaperUrl = async (): Promise<string> => {
     const pointer = readStoragePointer();
-    if (pointer === WALLPAPER_IDB_MARKER || pointer.startsWith("idb:")) {
-        try {
-            const blob = await idbGetWallpaper();
-            if (blob) {
-                revokeLiveObjectUrl();
-                liveObjectUrl = URL.createObjectURL(blob);
-                return liveObjectUrl;
-            }
-        } catch (err) {
-            console.warn("[fest/image] wallpaper IDB restore failed", err);
+    if (isIdbPointer(pointer) || isUnusableStoredUrl(pointer)) {
+        const url = await restoreWallpaperBlobUrl();
+        if (url) {
+            if (!isIdbPointer(pointer)) writeStoragePointer(WALLPAPER_IDB_MARKER);
+            return url;
         }
         return DEFAULT_WALLPAPER_URL;
-    }
-    /* Stale huge data: URLs in storage are unusable after quota failures — treat as miss. */
-    if (pointer.startsWith("data:") && pointer.length > LOCAL_STORAGE_SAFE_CHARS) {
-        try {
-            const blob = await idbGetWallpaper();
-            if (blob) {
-                revokeLiveObjectUrl();
-                liveObjectUrl = URL.createObjectURL(blob);
-                writeStoragePointer(WALLPAPER_IDB_MARKER);
-                return liveObjectUrl;
-            }
-        } catch {
-            /* fall through */
-        }
     }
     return pointer || DEFAULT_WALLPAPER_URL;
 };
@@ -271,7 +292,8 @@ export const setAppWallpaperFromBlob = async (blob: Blob): Promise<string> => {
     revokeLiveObjectUrl();
     liveObjectUrl = URL.createObjectURL(blob);
     paintWallpaperOnCanvases(liveObjectUrl);
-    void applyThemeFromWallpaper(liveObjectUrl, { force: true }).then(() => {
+    /* WHY: pass Blob, not the object URL — revoke/re-resolve must not kill KMeans fetch. */
+    void applyThemeFromWallpaper(blob, { force: true }).then(() => {
         document.querySelectorAll<HTMLElement>(".app-canvas__glow").forEach(syncGlowToTheme);
     });
     try {
@@ -350,7 +372,7 @@ export const initializeAppCanvasLayer = (container: HTMLElement): CanvasLayerSta
 
     const pointer = readStoragePointer();
     const coldUrl =
-        pointer === WALLPAPER_IDB_MARKER || pointer.startsWith("idb:") || pointer.startsWith("data:")
+        isIdbPointer(pointer) || pointer.startsWith("data:") || pointer.startsWith("blob:")
             ? DEFAULT_WALLPAPER_URL
             : pointer;
     canvas.setAttribute("data-src", coldUrl);
@@ -360,11 +382,15 @@ export const initializeAppCanvasLayer = (container: HTMLElement): CanvasLayerSta
     restoreWallpaperThemeCache();
     syncGlowToTheme(glow);
 
-    void resolveAppWallpaperUrl().then((wallpaper) => {
+    void (async () => {
+        const wallpaper = await resolveAppWallpaperUrl();
         canvas.setAttribute("data-src", wallpaper);
         syncCanvasOrient(canvas);
-        return applyThemeFromWallpaper(wallpaper).then(() => syncGlowToTheme(glow));
-    });
+        const themeSrc =
+            wallpaper.startsWith("blob:") ? (await idbGetWallpaper()) || wallpaper : wallpaper;
+        await applyThemeFromWallpaper(themeSrc);
+        syncGlowToTheme(glow);
+    })();
 
     return { root, canvas, glow, disposeOrient };
 };
@@ -385,8 +411,10 @@ export const setAppWallpaper = (wallpaperUrl: string): void => {
                 await setAppWallpaperFromBlob(blob);
             } catch (err) {
                 console.warn("[fest/image] setAppWallpaper inline persist failed", err);
-                paintWallpaperOnCanvases(value);
-                void applyThemeFromWallpaper(value, { force: true }).then(() => {
+                /* Dead/foreign blob: must not be fetched for paint or KMeans. */
+                const fallback = value.startsWith("blob:") ? DEFAULT_WALLPAPER_URL : value;
+                paintWallpaperOnCanvases(fallback);
+                void applyThemeFromWallpaper(fallback, { force: true }).then(() => {
                     document.querySelectorAll<HTMLElement>(".app-canvas__glow").forEach(syncGlowToTheme);
                 });
             }
