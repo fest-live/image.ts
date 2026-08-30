@@ -10,6 +10,7 @@
 import { formatHex, oklch, parse } from "culori";
 import { getDominantColors } from "./KMean.js";
 import { Q } from "@fest-lib/lure";
+import { setStyleProperty } from "@fest-lib/style-lib";
 
 export type RgbTuple = [number, number, number];
 
@@ -300,11 +301,11 @@ export const applyWallpaperPaperTokens = (
     registerColorProperty("--env-launcher-fg-glow", glow);
 
     for (const host of hosts) {
-        host.style.setProperty("--wallpaper-underlying-color", paper.underlying);
-        host.style.setProperty("--wallpaper-contrast-color", paper.contrast);
-        host.style.setProperty("--env-launcher-fg", paper.contrast);
-        host.style.setProperty("--env-launcher-fg-shadow", shadow);
-        host.style.setProperty("--env-launcher-fg-glow", glow);
+        setStyleProperty(host, "--wallpaper-underlying-color", paper.underlying);
+        setStyleProperty(host, "--wallpaper-contrast-color", paper.contrast);
+        setStyleProperty(host, "--env-launcher-fg", paper.contrast);
+        setStyleProperty(host, "--env-launcher-fg-shadow", shadow);
+        setStyleProperty(host, "--env-launcher-fg-glow", glow);
     }
 
     const globalQuery = Q("body, html, .wf-demo-root, ui-window, .view-explorer, [data-view='explorer'], .view-viewer, [data-view='viewer'], .view-settings, [data-view='settings'], .cw-network-view, .cw-network-view-host");
@@ -378,7 +379,7 @@ export const applyWallpaperThemeSeeds = (seeds: WallpaperThemeSeeds): void => {
     if (!wallpaperSeedsMayPaint()) return;
     for (const host of themeHosts()) {
         for (const [prop, key] of SEED_PROPS) {
-            host.style.setProperty(prop, next[key]);
+            setStyleProperty(host, prop, next[key]);
         }
     }
     
@@ -392,10 +393,10 @@ export const applyWallpaperThemeSeeds = (seeds: WallpaperThemeSeeds): void => {
             "body, html, .wf-demo-root, ui-window, .view-explorer, [data-view='explorer'], .view-viewer, [data-view='viewer'], .view-settings, [data-view='settings'], .cw-network-view, .cw-network-view-host"
         )
         .forEach((el) => {
-            el.style.setProperty("--color-primary", next.primary);
-            el.style.setProperty("--base-color", next.primary);
-            el.style.setProperty("--color-secondary", next.secondary);
-            el.style.setProperty("--color-tertiary", next.tertiary);
+            setStyleProperty(el, "--color-primary", next.primary);
+            setStyleProperty(el, "--base-color", next.primary);
+            setStyleProperty(el, "--color-secondary", next.secondary);
+            setStyleProperty(el, "--color-tertiary", next.tertiary);
         });
 
     //
