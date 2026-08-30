@@ -28,6 +28,9 @@
             "@fest-lib/polyfill/*": [
                 "../../shared/fest/polyfill/*"
             ],
+            "@fest-lib/lure": [
+                "../../shared/fest/lure.ts"
+            ],
             "polyfill/*": [
                 "../../shared/fest/polyfill/*"
             ]

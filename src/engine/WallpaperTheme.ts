@@ -7,8 +7,9 @@
  * TAG:wallpaper-ink,veela,image
  */
 
-import { formatHex, oklch } from "culori";
+import { formatHex, oklch, parse } from "culori";
 import { getDominantColors } from "./KMean.js";
+import { Q } from "@fest-lib/lure";
 
 export type RgbTuple = [number, number, number];
 
@@ -269,6 +270,8 @@ const wallpaperSeedsMayPaint = (): boolean => {
     return src === "wallpaper" || src === "speed-dial" || src === "system-wallpaper";
 };
 
+const isValidColor = (color: string): boolean => Boolean(parse(color));
+
 /**
  * INVARIANT: paper/ink follow the photo even when colorSource is Material You
  * (`--base-color` stays gated; labels/rail still sit on the wallpaper).
@@ -277,11 +280,25 @@ export const applyWallpaperPaperTokens = (
     paper: WallpaperPaperTokens,
     extraHosts: Iterable<HTMLElement> = []
 ): void => {
+
+    //
     if (typeof document === "undefined") return;
     const darkPaper = paperLFromHex(paper.underlying) < PAPER_L_SPLIT;
     const { shadow, glow } = haloForPaper(darkPaper);
     const hosts = new Set<HTMLElement>(themeHosts());
     for (const el of extraHosts) hosts.add(el);
+
+    if (!isValidColor(paper.underlying)) return;
+    if (!isValidColor(paper.contrast)) return;
+    if (!isValidColor(shadow)) return;
+    if (!isValidColor(glow)) return;
+
+    registerColorProperty("--wallpaper-underlying-color", paper.underlying);
+    registerColorProperty("--wallpaper-contrast-color", paper.contrast);
+    registerColorProperty("--env-launcher-fg", paper.contrast);
+    registerColorProperty("--env-launcher-fg-shadow", shadow);
+    registerColorProperty("--env-launcher-fg-glow", glow);
+
     for (const host of hosts) {
         host.style.setProperty("--wallpaper-underlying-color", paper.underlying);
         host.style.setProperty("--wallpaper-contrast-color", paper.contrast);
@@ -289,7 +306,29 @@ export const applyWallpaperPaperTokens = (
         host.style.setProperty("--env-launcher-fg-shadow", shadow);
         host.style.setProperty("--env-launcher-fg-glow", glow);
     }
+
+    const globalQuery = Q("body, html, .wf-demo-root, ui-window, .view-explorer, [data-view='explorer'], .view-viewer, [data-view='viewer'], .view-settings, [data-view='settings'], .cw-network-view, .cw-network-view-host");
+    globalQuery.style.setProperty("--wallpaper-underlying-color", paper.underlying);
+    globalQuery.style.setProperty("--wallpaper-contrast-color", paper.contrast);
+    globalQuery.style.setProperty("--env-launcher-fg", paper.contrast);
+    globalQuery.style.setProperty("--env-launcher-fg-shadow", shadow);
+    globalQuery.style.setProperty("--env-launcher-fg-glow", glow);
 };
+
+
+//
+export const registerColorProperty = (name: string, initialValue: string = "#5a9ec8")=>{
+    try {
+        CSS?.registerProperty?.({
+            name,
+            syntax: "<color>",
+            inherits: true,
+            initialValue,
+        });
+    } catch (error) {
+        console.debug(error);
+    }
+}
 
 const persistLivePaper = (paper: WallpaperPaperTokens): void => {
     try {
@@ -342,10 +381,15 @@ export const applyWallpaperThemeSeeds = (seeds: WallpaperThemeSeeds): void => {
             host.style.setProperty(prop, next[key]);
         }
     }
+    
+    if (!isValidColor(next.primary)) return;
+    if (!isValidColor(next.secondary)) return;
+    if (!isValidColor(next.tertiary)) return;
+
     /* Late-mounted views inherit :root; stamp open roots for shadow isolation. */
     document
         .querySelectorAll<HTMLElement>(
-            ".view-explorer, [data-view='explorer'], .view-viewer, [data-view='viewer'], .view-settings, [data-view='settings'], .cw-network-view, .cw-network-view-host"
+            "body, html, .wf-demo-root, ui-window, .view-explorer, [data-view='explorer'], .view-viewer, [data-view='viewer'], .view-settings, [data-view='settings'], .cw-network-view, .cw-network-view-host"
         )
         .forEach((el) => {
             el.style.setProperty("--color-primary", next.primary);
@@ -353,6 +397,15 @@ export const applyWallpaperThemeSeeds = (seeds: WallpaperThemeSeeds): void => {
             el.style.setProperty("--color-secondary", next.secondary);
             el.style.setProperty("--color-tertiary", next.tertiary);
         });
+
+    //
+    const globalQuery = Q("body, html, .wf-demo-root, ui-window, .view-explorer, [data-view='explorer'], .view-viewer, [data-view='viewer'], .view-settings, [data-view='settings'], .cw-network-view, .cw-network-view-host");
+    globalQuery.style.setProperty("--color-primary", next.primary);
+    globalQuery.style.setProperty("--base-color", next.primary);
+    globalQuery.style.setProperty("--color-secondary", next.secondary);
+    globalQuery.style.setProperty("--color-tertiary", next.tertiary);
+
+    //
     document.dispatchEvent(
         new CustomEvent("u2-theme-change", { detail: { source: "wallpaper", seeds: next } })
     );
