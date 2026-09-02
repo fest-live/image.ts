@@ -437,6 +437,27 @@ export const applyThemeFromWallpaper = async (
             ? imgURL.slice(0, 2048)
             : `blob:${(imgURL as File).name || "wallpaper"}:${(imgURL as Blob).size}`;
 
+    if (typeof imgURL === "string") {
+        if (!imgURL) return null;
+        const failed = (globalThis as { [key: symbol]: Set<string> })[Symbol.for("image.canvas.failedWallpaperSrc")];
+        if (failed?.has(imgURL)) return null;
+        if (imgURL.startsWith("data:") && !/^data:image\//i.test(imgURL)) return null;
+        if (/video\/mp2t/i.test(imgURL)) return null;
+        if (/\/assets\/wallpaper\.jpg(?:$|[?#])/i.test(imgURL)) {
+            try {
+                const sku = String(document.documentElement?.dataset?.cwspSku || "").toLowerCase();
+                const host = String(globalThis.location?.hostname || "").toLowerCase();
+                if (sku === "process" || host === "process.u2re.space" || host === "workcenter.u2re.space" || host === "ai.u2re.space") {
+                    return null;
+                }
+            } catch {
+                return null;
+            }
+        }
+    } else if (imgURL instanceof Blob && imgURL.type && !imgURL.type.startsWith("image/") && imgURL.type !== "application/octet-stream") {
+        return null;
+    }
+
     const liveLuma = await sampleImageMeanLuma(imgURL);
     if (liveLuma != null) applyWallpaperPaperFromLuma(liveLuma);
 

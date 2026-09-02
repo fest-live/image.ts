@@ -60,7 +60,8 @@ const isIdbPointer = (pointer: string): boolean =>
 /** Stored `blob:` is always dead after reload; oversized `data:` is a quota leftover. */
 const isUnusableStoredUrl = (pointer: string): boolean =>
     pointer.startsWith("blob:") ||
-    (pointer.startsWith("data:") && pointer.length > LOCAL_STORAGE_SAFE_CHARS);
+    (pointer.startsWith("data:") &&
+        (pointer.length > LOCAL_STORAGE_SAFE_CHARS || !/^data:image\//i.test(pointer)));
 
 const revokeLiveObjectUrl = (): void => {
     wallpaperEpoch += 1;
@@ -198,7 +199,10 @@ export const resolveAppWallpaperUrl = async (): Promise<string> => {
             if (!isIdbPointer(pointer)) writeStoragePointer(WALLPAPER_IDB_MARKER);
             return url;
         }
-        return DEFAULT_WALLPAPER_URL;
+        return processHostSkipsBundledWallpaper() ? "" : DEFAULT_WALLPAPER_URL;
+    }
+    if (processHostSkipsBundledWallpaper() && (!pointer || pointer === DEFAULT_WALLPAPER_URL)) {
+        return "";
     }
     return pointer || DEFAULT_WALLPAPER_URL;
 };
@@ -370,12 +374,15 @@ export const initializeAppCanvasLayer = (container: HTMLElement): CanvasLayerSta
 
     root.append(glow, canvas);
 
+    rememberMissingDefaultWallpaper();
     const pointer = readStoragePointer();
     const coldUrl =
         isIdbPointer(pointer) || pointer.startsWith("data:") || pointer.startsWith("blob:")
             ? DEFAULT_WALLPAPER_URL
             : pointer;
-    canvas.setAttribute("data-src", coldUrl);
+    if (coldUrl && !failedWallpaperSrc.has(coldUrl)) {
+        canvas.setAttribute("data-src", coldUrl);
+    }
     const disposeOrient = syncCanvasOrient(canvas);
 
     /* Cold paint: restore last seeds, then re-extract from current wallpaper. */
@@ -384,6 +391,10 @@ export const initializeAppCanvasLayer = (container: HTMLElement): CanvasLayerSta
 
     void (async () => {
         const wallpaper = await resolveAppWallpaperUrl();
+        if (!wallpaper || failedWallpaperSrc.has(wallpaper)) {
+            syncGlowToTheme(glow);
+            return;
+        }
         canvas.setAttribute("data-src", wallpaper);
         syncCanvasOrient(canvas);
         const themeSrc =
@@ -459,6 +470,22 @@ export const sheduler = globalThis[shedulerSymbol];
 const failedWallpaperSrcSymbol = Symbol.for("image.canvas.failedWallpaperSrc");
 globalThis[failedWallpaperSrcSymbol] ??= new Set<string>();
 export const failedWallpaperSrc = globalThis[failedWallpaperSrcSymbol];
+
+/** Process PWA does not ship `/assets/wallpaper.jpg` — skip the 404 + decode loop. */
+const processHostSkipsBundledWallpaper = (): boolean => {
+    try {
+        const sku = String(document.documentElement?.dataset?.cwspSku || "").toLowerCase();
+        if (sku === "process") return true;
+        const host = String(globalThis.location?.hostname || "").toLowerCase();
+        return host === "process.u2re.space" || host === "workcenter.u2re.space" || host === "ai.u2re.space";
+    } catch {
+        return false;
+    }
+};
+
+const rememberMissingDefaultWallpaper = (): void => {
+    if (processHostSkipsBundledWallpaper()) failedWallpaperSrc.add(DEFAULT_WALLPAPER_URL);
+};
 
 //
 const getImgWidth = (img)=>{
@@ -698,6 +725,10 @@ if (typeof HTMLCanvasElement != "undefined") {
             this.#loading = ready;
             if (!ready || typeof ready !== "string") return Promise.resolve();
             if (failedWallpaperSrc.has(ready)) return Promise.resolve();
+            if (ready.startsWith("data:") && !/^data:image\//i.test(ready)) {
+                failedWallpaperSrc.add(ready);
+                return Promise.resolve();
+            }
             return fetch(ready, {
                 cache: "force-cache",
                 mode: "same-origin",
