@@ -2,6 +2,7 @@
  * Filename: Canvas.ts
  * FullPath: modules/projects/image.ts/src/canvas/Canvas.ts
  * Change date and time: 23.10.00_23.08.2026
+ * FIND:wallpaper-boot
  * Reason for changes: Skip 404 wallpaper fetch/decode — CRX missing /assets/wallpaper.jpg threw on open.
  */
 import { makeRAFCycle } from "@fest-lib/dom";
@@ -31,6 +32,13 @@ import {
 
 const WALLPAPER_STORAGE_KEY = "rs-wallpaper-image";
 const DEFAULT_WALLPAPER_URL = "/assets/wallpaper.jpg";
+/**
+ * Stable same-origin URL for a custom photo.
+ * INVARIANT: bytes live in Cache `cwsp-user-wallpaper`; SW `addRoutes` serves this
+ * path from that cache before the worker starts, so the stock file is not requested.
+ */
+export const USER_WALLPAPER_PATH = "/assets/user-wallpaper";
+export const USER_WALLPAPER_CACHE = "cwsp-user-wallpaper";
 /** Marker stored in localStorage when bytes live in IndexedDB. */
 export const WALLPAPER_IDB_MARKER = "idb:rs-wallpaper";
 const IDB_NAME = "cwsp-wallpaper-v1";
@@ -131,6 +139,26 @@ const idbGetWallpaper = async (): Promise<Blob | null> => {
     }
 };
 
+const cacheUserWallpaper = async (blob: Blob): Promise<void> => {
+    if (typeof caches === "undefined" || !(blob instanceof Blob) || blob.size <= 0) return;
+    const cache = await caches.open(USER_WALLPAPER_CACHE);
+    const type = blob.type && blob.type.startsWith("image/") ? blob.type : "image/jpeg";
+    await cache.put(
+        new Request(USER_WALLPAPER_PATH),
+        new Response(blob, { headers: { "Content-Type": type } })
+    );
+};
+
+const clearCachedUserWallpaper = async (): Promise<void> => {
+    if (typeof caches === "undefined") return;
+    try {
+        const cache = await caches.open(USER_WALLPAPER_CACHE);
+        await cache.delete(new Request(USER_WALLPAPER_PATH));
+    } catch {
+        /* ignore */
+    }
+};
+
 const idbClearWallpaper = async (): Promise<void> => {
     try {
         const db = await openWallpaperDb();
@@ -205,6 +233,52 @@ export const resolveAppWallpaperUrl = async (): Promise<string> => {
         return "";
     }
     return pointer || DEFAULT_WALLPAPER_URL;
+};
+
+type WarmedWallpaper = { url: string; blob: Blob };
+let warmPromise: Promise<WarmedWallpaper | null> | null = null;
+
+/**
+ * PERF: start IDB/network wallpaper bytes during boot, before the shell canvas exists.
+ * First Capacitor launch otherwise waits for CSS + custom-element setup before fetch.
+ */
+export const warmAppWallpaper = (): Promise<WarmedWallpaper | null> => {
+    if (warmPromise) return warmPromise;
+    warmPromise = (async (): Promise<WarmedWallpaper | null> => {
+        const pointer = readStoragePointer();
+        if (isIdbPointer(pointer) || isUnusableStoredUrl(pointer)) {
+            const blob = await idbGetWallpaper();
+            if (!blob) return null;
+            /* WHY: next navigation hits addRoutes / the early script without opening IDB. */
+            void cacheUserWallpaper(blob).catch(() => undefined);
+            const url = adoptWallpaperBlob(blob, wallpaperEpoch);
+            return url ? { url, blob } : null;
+        }
+        const url = pointer || DEFAULT_WALLPAPER_URL;
+        if (!url || url === DEFAULT_WALLPAPER_URL) {
+            try {
+                const sku = String(document.documentElement?.dataset?.cwspSku || "").toLowerCase();
+                if (sku === "process") return null;
+            } catch {
+                return null;
+            }
+        }
+        if (!url) return null;
+        const rsp = await fetch(url, { cache: "force-cache", priority: "high" } as RequestInit);
+        if (!rsp.ok) return null;
+        const blob = await rsp.blob();
+        if (!blob.size || (blob.type && !blob.type.startsWith("image/"))) return null;
+        return { url, blob };
+    })().catch(() => null);
+    return warmPromise;
+};
+
+const warmedBlobFor = async (src: string): Promise<Blob | null> => {
+    if (!warmPromise || !src) return null;
+    const warm = await warmPromise;
+    if (!warm) return null;
+    if (warm.url === src || warm.url === src.split("#")[0]) return warm.blob;
+    return null;
 };
 
 /** Durable pointer currently stored (`/assets/…` or {@link WALLPAPER_IDB_MARKER}). */
@@ -303,6 +377,7 @@ export const setAppWallpaperFromBlob = async (blob: Blob): Promise<string> => {
     try {
         await idbPutWallpaper(blob);
         writeStoragePointer(WALLPAPER_IDB_MARKER);
+        void cacheUserWallpaper(blob).catch(() => undefined);
     } catch (err) {
         console.warn("[fest/image] wallpaper IDB persist failed", err);
         /* Last resort: try localStorage data URL (may still quota-fail). */
@@ -372,17 +447,54 @@ export const initializeAppCanvasLayer = (container: HTMLElement): CanvasLayerSta
     canvas.style.setProperty("background-color", "transparent", "important");
     canvas.style.setProperty("opacity", "1", "important");
 
-    root.append(glow, canvas);
+    const poster = document.createElement("img");
+    poster.className = "app-canvas__poster";
+    poster.alt = "";
+    poster.decoding = "async";
+    poster.setAttribute("fetchpriority", "high");
+    poster.draggable = false;
+    poster.style.position = "absolute";
+    poster.style.inset = "0";
+    poster.style.inlineSize = "100%";
+    poster.style.blockSize = "100%";
+    poster.style.objectFit = "cover";
+    poster.style.pointerEvents = "none";
+    root.append(poster, glow, canvas);
+    poster.addEventListener("load", () => {
+        try {
+            document.documentElement.removeAttribute("data-cwsp-wallpaper-poster");
+        } catch {
+            /* ignore */
+        }
+    }, { once: true });
+    poster.addEventListener("error", () => {
+        /* Cache miss: keep the document photo (IDB blob) instead of a broken stock frame. */
+        if (poster.src.includes(USER_WALLPAPER_PATH)) poster.removeAttribute("src");
+    });
 
     rememberMissingDefaultWallpaper();
     const pointer = readStoragePointer();
-    const coldUrl =
-        isIdbPointer(pointer) || pointer.startsWith("data:") || pointer.startsWith("blob:")
-            ? DEFAULT_WALLPAPER_URL
+    /* WHY: an IDB photo must not cold-start the bundled file — that frame paints first. */
+    const coldUrl = isIdbPointer(pointer)
+        ? USER_WALLPAPER_PATH
+        : pointer.startsWith("data:") || pointer.startsWith("blob:")
+            ? ""
             : pointer;
+    const warming = warmAppWallpaper();
     if (coldUrl && !failedWallpaperSrc.has(coldUrl)) {
         canvas.setAttribute("data-src", coldUrl);
+        /* WHY: <img> paints before ui-canvas has a 2d context (first Capacitor frame). */
+        poster.src = coldUrl;
     }
+    void warming.then((warm) => {
+        if (!warm || !poster.isConnected) return;
+        if (warm.url.startsWith("blob:")) {
+            poster.src = warm.url;
+            canvas.setAttribute("data-src", warm.url);
+            return;
+        }
+        if (!poster.getAttribute("src")) poster.src = warm.url;
+    });
     const disposeOrient = syncCanvasOrient(canvas);
 
     /* Cold paint: restore last seeds, then re-extract from current wallpaper. */
@@ -396,11 +508,17 @@ export const initializeAppCanvasLayer = (container: HTMLElement): CanvasLayerSta
             return;
         }
         canvas.setAttribute("data-src", wallpaper);
+        if (poster.isConnected) poster.src = wallpaper;
         syncCanvasOrient(canvas);
         const themeSrc =
             wallpaper.startsWith("blob:") ? (await idbGetWallpaper()) || wallpaper : wallpaper;
-        await applyThemeFromWallpaper(themeSrc);
-        syncGlowToTheme(glow);
+        /* PERF: KMeans decode fights the first wallpaper paint. Seeds already restored. */
+        const extract = (): void => {
+            void applyThemeFromWallpaper(themeSrc).then(() => syncGlowToTheme(glow));
+        };
+        const ric = (globalThis as { requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number }).requestIdleCallback;
+        if (typeof ric === "function") ric(extract, { timeout: 1200 });
+        else globalThis.setTimeout?.(extract, 320);
     })();
 
     return { root, canvas, glow, disposeOrient };
@@ -434,6 +552,7 @@ export const setAppWallpaper = (wallpaperUrl: string): void => {
     }
 
     void idbClearWallpaper();
+    void clearCachedUserWallpaper();
     revokeLiveObjectUrl();
     if (!writeStoragePointer(value)) {
         console.warn("[fest/image] wallpaper pointer write failed");
@@ -509,7 +628,14 @@ const create2dContext = (canvas: HTMLCanvasElement): CanvasRenderingContext2D | 
         powerPreference: "high-performance",
         preserveDrawingBuffer: true,
     };
-    for (const colorSpace of ["rec2100-hlg", "display-p3", "srgb"] as const) {
+    const native =
+        typeof document !== "undefined" &&
+        document.documentElement?.dataset?.cwspNativeShell === "capacitor";
+    /* PERF: rec2100 probe throws on Android WebView and delays the first context. */
+    const spaces = native
+        ? (["srgb", "display-p3"] as const)
+        : (["rec2100-hlg", "display-p3", "srgb"] as const);
+    for (const colorSpace of spaces) {
         try {
             const ctx = canvas.getContext("2d", { ...base, colorSpace });
             if (ctx) return ctx;
@@ -538,7 +664,24 @@ export const cover = (ctx, img, scale = 1, port, orient = 0) => {
 export const createImageBitmapCache = (blob)=>{
     if (!blobImageMap.has(blob) && (blob instanceof Blob || blob instanceof File || blob instanceof OffscreenCanvas || blob instanceof ImageBitmap || blob instanceof Image)) {
         // WHY: do not cache a rejected promise forever — first decode race would stick.
-        const pending = createImageBitmap(blob).catch((err) => {
+        const edge = (() => {
+            const dpr = Math.min(globalThis.devicePixelRatio || 1, 2);
+            const css = Math.max(globalThis.screen?.width || 0, globalThis.screen?.height || 0, 800);
+            return Math.round(Math.min(1600, css * dpr));
+        })();
+        const pending = (async () => {
+            if (blob instanceof Blob && blob.size > 180_000) {
+                try {
+                    return await createImageBitmap(blob, {
+                        resizeWidth: edge,
+                        resizeQuality: "medium"
+                    });
+                } catch {
+                    /* older WebView: full decode */
+                }
+            }
+            return createImageBitmap(blob);
+        })().catch((err) => {
             blobImageMap.delete(blob);
             throw err;
         });
@@ -729,10 +872,18 @@ if (typeof HTMLCanvasElement != "undefined") {
                 failedWallpaperSrc.add(ready);
                 return Promise.resolve();
             }
-            return fetch(ready, {
-                cache: "force-cache",
-                mode: "same-origin",
-            })?.then?.(async (rsp) => {
+            const warmed = warmedBlobFor(ready);
+            return warmed.then((blob) => {
+                if (blob && ready === this.#loading) {
+                    return this.$useImageAsSource(blob, ready)?.catch?.(() => {
+                        failedWallpaperSrc.add(ready);
+                    });
+                }
+                return fetch(ready, {
+                    cache: "force-cache",
+                    mode: "same-origin",
+                    priority: "high"
+                } as RequestInit)?.then?.(async (rsp) => {
                 if (!rsp.ok) {
                     failedWallpaperSrc.add(ready);
                     return;
@@ -747,6 +898,7 @@ if (typeof HTMLCanvasElement != "undefined") {
                 });
             })?.catch?.(() => {
                 failedWallpaperSrc.add(ready);
+            });
             });
         }
         #render(whatIsReady?: File | Blob | string) {
