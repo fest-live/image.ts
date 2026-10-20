@@ -322,8 +322,8 @@ export const syncAppWallpaperOrient = (): void => {
 /** Re-resolve storage/IDB pointer and repaint — after HOME/back or WebView resume. */
 export const refreshAppWallpaperPaint = (): void => {
     void resolveAppWallpaperUrl().then((url) => {
-        paintWallpaperOnCanvases(url);
         syncAppWallpaperOrient();
+        paintWallpaperOnCanvases(url);
     });
 };
 
@@ -435,10 +435,10 @@ export const initializeAppCanvasLayer = (container: HTMLElement): CanvasLayerSta
     canvas.style.position = "absolute";
     canvas.style.inset = "0";
     canvas.style.pointerEvents = "none";
-    canvas.style.inlineSize = "100%";
-    canvas.style.blockSize = "100%";
-    canvas.style.maxInlineSize = "100%";
-    canvas.style.maxBlockSize = "100%";
+    canvas.style.inlineSize = "min(100cqi, 100dvi)";
+    canvas.style.blockSize = "min(100cqb, 100dvb)";
+    canvas.style.maxInlineSize = "min(100cqi, 100dvi)";
+    canvas.style.maxBlockSize = "min(100cqb, 100dvb)";
     canvas.style.opacity = "1";
     canvas.style.mixBlendMode = "normal";
     canvas.setAttribute("is", "ui-canvas");
@@ -455,9 +455,10 @@ export const initializeAppCanvasLayer = (container: HTMLElement): CanvasLayerSta
     poster.draggable = false;
     poster.style.position = "absolute";
     poster.style.inset = "0";
-    poster.style.inlineSize = "100%";
-    poster.style.blockSize = "100%";
+    poster.style.inlineSize = "min(100cqi, 100dvi)";
+    poster.style.blockSize = "min(100cqb, 100dvb)";
     poster.style.objectFit = "cover";
+    poster.style.objectPosition = "center";
     poster.style.pointerEvents = "none";
     root.append(poster, glow, canvas);
     poster.addEventListener("load", () => {
@@ -742,14 +743,15 @@ if (typeof HTMLCanvasElement != "undefined") {
         //
         connectedCallback() {
             const parent: HTMLElement = this.parentNode as HTMLElement;
-            this.style.setProperty("max-inline-size", "min(100%, min(100cqi, 100dvi))");
-            this.style.setProperty("max-block-size", "min(100%, min(100cqb, 100dvb))");
+            this.style.setProperty("max-inline-size", "min(100cqi, 100dvi)");
+            this.style.setProperty("max-block-size", "min(100cqb, 100dvb)");
             this.#size = [ // @ts-ignore
                 Math.min(Math.min(Math.max(this.clientWidth || parent?.clientWidth || 1, 1), parent?.clientWidth || 1) * (this.currentCSSZoom || 1), Math.min(screen?.width, globalThis?.screen?.availWidth || screen?.width) || 1) * (devicePixelRatio || 1), // @ts-ignore
                 Math.min(Math.min(Math.max(this.clientHeight || parent?.clientHeight || 1, 1), parent?.clientHeight || 1) * (this.currentCSSZoom || 1), Math.min(screen?.height, globalThis?.screen?.availHeight || screen?.height) || 1) * (devicePixelRatio || 1)
             ];
             this.#preload(this.#loading = this.dataset.src || this.#loading);
             // WHY: late connect after orient attr was set before CE upgrade — force one paint pass.
+            this.#orient = currentOrientNumber();
             if (this.image) this.#render(this.#ready);
         }
 
@@ -794,8 +796,10 @@ if (typeof HTMLCanvasElement != "undefined") {
                 this.classList.add("ui-canvas");
 
                 //
-                this.style.setProperty("max-inline-size", "min(100%, min(100cqi, 100dvi))");
-                this.style.setProperty("max-block-size", "min(100%, min(100cqb, 100dvb))");
+                this.style.setProperty("inline-size", "min(100cqi, 100dvi)");
+                this.style.setProperty("block-size", "min(100cqb, 100dvb)");
+                this.style.setProperty("max-inline-size", "min(100cqi, 100dvi)");
+                this.style.setProperty("max-block-size", "min(100cqb, 100dvb)");
                 this.style.setProperty("dynamic-range-limit", "no-limit");
                 this.style.setProperty("color-space", "display-p3");
                 this.style.setProperty("background-color", "transparent", "important");
@@ -814,6 +818,7 @@ if (typeof HTMLCanvasElement != "undefined") {
                                 Math.max(/*contentBox.inlineSize * devicePixelRatio*/box.inlineSize || this.width, 1),
                                 Math.max(/*contentBox.blockSize  * devicePixelRatio*/box.blockSize || this.height, 1)
                             ];
+                            this.#orient = currentOrientNumber();
                             if (old?.[0] != this.#size[0] || old?.[1] != this.#size[1]) {
                                 this.#render(this.#ready);
                             }
@@ -823,6 +828,7 @@ if (typeof HTMLCanvasElement != "undefined") {
 
                 // WHY: data-src / connectedCallback may have finished preload before ctx existed.
                 this.#preload(this.#loading = this.dataset.src || this.#loading);
+                this.#orient = currentOrientNumber();
                 if (this.image) this.#render(this.#ready || this.#loading);
             });
         }
