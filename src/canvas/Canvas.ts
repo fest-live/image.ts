@@ -582,9 +582,9 @@ globalThis[delayedSymbol] ??= new Map<number, Function | null>([]);
 export const delayed = globalThis[delayedSymbol];
 
 //
-const shedulerSymbol = Symbol.for("image.canvas.sheduler");
-globalThis[shedulerSymbol] ??= makeRAFCycle();
-export const sheduler = globalThis[shedulerSymbol];
+const schedulerSymbol = Symbol.for("image.canvas.scheduler");
+globalThis[schedulerSymbol] ??= makeRAFCycle();
+export const schedulerRf = globalThis[schedulerSymbol];
 
 //
 const failedWallpaperSrcSymbol = Symbol.for("image.canvas.failedWallpaperSrc");
@@ -778,7 +778,7 @@ if (typeof HTMLCanvasElement != "undefined") {
             }
 
             //
-            sheduler?.shedule?.(() => {
+            scheduler?.yield?.()?.then?.(() => {
                 this.ctx = create2dContext(canvas);
                 try {
                     this.ctx?.configureHighDynamicRange?.({ mode: "extended" });
@@ -909,7 +909,7 @@ if (typeof HTMLCanvasElement != "undefined") {
         }
         #render(whatIsReady?: File | Blob | string) {
             const ctx = this.ctx, img = this.image;
-            if (img && ctx && (whatIsReady == this.#loading || !whatIsReady)) { sheduler?.shedule?.(bindCached(this.$renderPass, this)); }
+            if (img && ctx && (whatIsReady == this.#loading || !whatIsReady)) { scheduler?.yield?.()?.then?.(bindCached(this.$renderPass, this)); }
         }
     }
 } else {
