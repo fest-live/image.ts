@@ -327,7 +327,8 @@ export const registerColorProperty = (name: string, initialValue: string = "#5a9
             initialValue,
         });
     } catch (error) {
-        console.debug(error);
+        // don't log it
+        //console.debug(error);
     }
 }
 
