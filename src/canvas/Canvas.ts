@@ -447,6 +447,7 @@ export const initializeAppCanvasLayer = (container: HTMLElement): CanvasLayerSta
     canvas.style.setProperty("background-color", "transparent", "important");
     canvas.style.setProperty("opacity", "1", "important");
 
+    // TODO: corrent orientation of poster...
     const poster = document.createElement("img");
     poster.className = "app-canvas__poster";
     poster.alt = "";
@@ -460,7 +461,7 @@ export const initializeAppCanvasLayer = (container: HTMLElement): CanvasLayerSta
     poster.style.objectFit = "cover";
     poster.style.objectPosition = "center";
     poster.style.pointerEvents = "none";
-    root.append(poster, glow, canvas);
+    root.append(/*poster,*/ glow, canvas);
     poster.addEventListener("load", () => {
         try {
             document.documentElement.removeAttribute("data-cwsp-wallpaper-poster");
@@ -469,6 +470,7 @@ export const initializeAppCanvasLayer = (container: HTMLElement): CanvasLayerSta
         }
     }, { once: true });
     poster.addEventListener("error", () => {
+        poster.style.display = "none";
         /* Cache miss: keep the document photo (IDB blob) instead of a broken stock frame. */
         if (poster.src.includes(USER_WALLPAPER_PATH)) poster.removeAttribute("src");
     });
@@ -709,6 +711,14 @@ const bindCached = (cb, ctx) => {
 };
 
 //
+const rafYield = ()=>{
+    return Promise.race([
+        scheduler?.yield(),
+        new Promise((rv)=> requestAnimationFrame(rv))
+    ]);
+}
+
+//
 let UICanvas: any = null;
 if (typeof HTMLCanvasElement != "undefined") {
     UICanvas = class UICanvas extends HTMLCanvasElement {
@@ -778,7 +788,7 @@ if (typeof HTMLCanvasElement != "undefined") {
             }
 
             //
-            scheduler?.yield?.()?.then?.(() => {
+            rafYield?.()?.then?.(() => {
                 this.ctx = create2dContext(canvas);
                 try {
                     this.ctx?.configureHighDynamicRange?.({ mode: "extended" });
@@ -909,7 +919,7 @@ if (typeof HTMLCanvasElement != "undefined") {
         }
         #render(whatIsReady?: File | Blob | string) {
             const ctx = this.ctx, img = this.image;
-            if (img && ctx && (whatIsReady == this.#loading || !whatIsReady)) { scheduler?.yield?.()?.then?.(bindCached(this.$renderPass, this)); }
+            if (img && ctx && (whatIsReady == this.#loading || !whatIsReady)) { rafYield?.()?.then?.(bindCached(this.$renderPass, this)); }
         }
     }
 } else {
