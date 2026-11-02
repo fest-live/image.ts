@@ -735,11 +735,11 @@ if (typeof HTMLCanvasElement != "undefined") {
         //
         get #orient() {
             const raw = this.getAttribute("data-orient") ?? this.getAttribute("orient") ?? "0";
-            const n = Number.parseInt(raw, 10);
-            return Number.isFinite(n) ? n : 0;
+            const n = Number.parseInt(raw, 10) || currentOrientNumber();
+            return Number.isFinite(n) ? n : currentOrientNumber();
         }
         set #orient(value: number) {
-            const s = String(value);
+            const s = String(value ?? currentOrientNumber());
             this.setAttribute("data-orient", s);
             this.setAttribute("orient", s);
         }
@@ -755,6 +755,26 @@ if (typeof HTMLCanvasElement != "undefined") {
             const parent: HTMLElement = this.parentNode as HTMLElement;
             this.style.setProperty("max-inline-size", "min(100cqi, 100dvi)");
             this.style.setProperty("max-block-size", "min(100cqb, 100dvb)");
+
+            //
+            this.inert = true;
+            this.style.objectFit = "cover";
+            this.style.objectPosition = "center";
+            if (!this.classList.contains("u-canvas")) this.classList.add("u-canvas");
+            if (!this.classList.contains("u2-canvas")) this.classList.add("u2-canvas");
+            if (!this.classList.contains("ui-canvas")) this.classList.add("ui-canvas");
+
+            //
+            this.style.setProperty("inline-size", "min(100cqi, 100dvi)");
+            this.style.setProperty("block-size", "min(100cqb, 100dvb)");
+            this.style.setProperty("max-inline-size", "min(100cqi, 100dvi)");
+            this.style.setProperty("max-block-size", "min(100cqb, 100dvb)");
+            this.style.setProperty("dynamic-range-limit", "no-limit");
+            this.style.setProperty("color-space", "display-p3");
+            this.style.setProperty("background-color", "transparent", "important");
+            this.style.setProperty("opacity", "1", "important");
+
+            //
             this.#size = [ // @ts-ignore
                 Math.min(Math.min(Math.max(this.clientWidth || parent?.clientWidth || 1, 1), parent?.clientWidth || 1) * (this.currentCSSZoom || 1), Math.min(screen?.width, globalThis?.screen?.availWidth || screen?.width) || 1) * (devicePixelRatio || 1), // @ts-ignore
                 Math.min(Math.min(Math.max(this.clientHeight || parent?.clientHeight || 1, 1), parent?.clientHeight || 1) * (this.currentCSSZoom || 1), Math.min(screen?.height, globalThis?.screen?.availHeight || screen?.height) || 1) * (devicePixelRatio || 1)
@@ -776,6 +796,7 @@ if (typeof HTMLCanvasElement != "undefined") {
             //
             const fixSize = () => {
                 const old = this.#size;
+                try { this.#orient = currentOrientNumber(); } catch(e) {};
                 this.#size = [ // @ts-ignore
                     Math.min(Math.min(Math.max(this.clientWidth || parent?.clientWidth || 1, 1), parent?.clientWidth || 1) * (this.currentCSSZoom || 1), Math.min(screen?.width, globalThis?.screen?.availWidth || screen?.width) || 1) * (devicePixelRatio || 1), // @ts-ignore
                     Math.min(Math.min(Math.max(this.clientHeight || parent?.clientHeight || 1, 1), parent?.clientHeight || 1) * (this.currentCSSZoom || 1), Math.min(screen?.height, globalThis?.screen?.availHeight || screen?.height) || 1) * (devicePixelRatio || 1)
@@ -789,6 +810,34 @@ if (typeof HTMLCanvasElement != "undefined") {
 
             //
             rafYield?.()?.then?.(() => {
+                //
+                try {
+                    this.inert = true;
+                    this.style.objectFit = "cover";
+                    this.style.objectPosition = "center";
+                    this.classList.add("u-canvas");
+                    this.classList.add("u2-canvas");
+                    this.classList.add("ui-canvas");
+
+                    //
+                    this.style.setProperty("inline-size", "min(100cqi, 100dvi)");
+                    this.style.setProperty("block-size", "min(100cqb, 100dvb)");
+                    this.style.setProperty("max-inline-size", "min(100cqi, 100dvi)");
+                    this.style.setProperty("max-block-size", "min(100cqb, 100dvb)");
+                    this.style.setProperty("dynamic-range-limit", "no-limit");
+                    this.style.setProperty("color-space", "display-p3");
+                    this.style.setProperty("background-color", "transparent", "important");
+                    this.style.setProperty("opacity", "1", "important");
+                } catch(e) {
+
+                }
+
+                try {
+                    this.#orient = currentOrientNumber();
+                } catch(e) {
+
+                }
+
                 this.ctx = create2dContext(canvas);
                 try {
                     this.ctx?.configureHighDynamicRange?.({ mode: "extended" });
@@ -796,24 +845,6 @@ if (typeof HTMLCanvasElement != "undefined") {
                 } catch {
                     /* HDR optional */
                 }
-
-                //
-                this.inert = true;
-                this.style.objectFit = "cover";
-                this.style.objectPosition = "center";
-                this.classList.add("u-canvas");
-                this.classList.add("u2-canvas");
-                this.classList.add("ui-canvas");
-
-                //
-                this.style.setProperty("inline-size", "min(100cqi, 100dvi)");
-                this.style.setProperty("block-size", "min(100cqb, 100dvb)");
-                this.style.setProperty("max-inline-size", "min(100cqi, 100dvi)");
-                this.style.setProperty("max-block-size", "min(100cqb, 100dvb)");
-                this.style.setProperty("dynamic-range-limit", "no-limit");
-                this.style.setProperty("color-space", "display-p3");
-                this.style.setProperty("background-color", "transparent", "important");
-                this.style.setProperty("opacity", "1", "important");
 
                 //
                 fixSize();
@@ -863,7 +894,7 @@ if (typeof HTMLCanvasElement != "undefined") {
                 //this.style.containIntrinsicBlockSize  = `${this.height || 1}px`;
 
                 //
-                const ox = (this.#orient % 2) || 0;
+                const ox = (((this.#orient ?? currentOrientNumber()) || 0) % 2);
                 const port = getImgWidth(img) <= getImgHeight(img) ? 1 : 0;
                 const scale = Math.max(
                     canvas[["height", "width"][ox]] / (port ? getImgHeight(img) : getImgWidth(img)),
@@ -872,7 +903,7 @@ if (typeof HTMLCanvasElement != "undefined") {
 
                 //
                 ctx.save();
-                ctx.clearRect(0, 0, canvas.width, canvas.height); cover(ctx, img, scale, port, this.#orient);
+                ctx.clearRect(0, 0, canvas.width, canvas.height); cover(ctx, img, scale, port, (this.#orient ?? currentOrientNumber()) || 0);
                 ctx.drawImage(img, 0, 0, img.width * scale, img.height * scale);
                 ctx.restore();
             }
@@ -929,7 +960,7 @@ if (typeof HTMLCanvasElement != "undefined") {
         $useImageAsSource(blob, ready?: any | null) { return blob; }
         #preload(src) { return Promise.resolve(); }
         #render(whatIsReady?: File | Blob | string) { }
-        #orient: number = 0;
+        #orient: number = currentOrientNumber();
         #loading: string | Blob | File = "";
         #ready: string | Blob | File = "";
         #size: [number, number] = [1, 1];
