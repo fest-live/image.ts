@@ -422,9 +422,9 @@ export const initializeAppCanvasLayer = (container: HTMLElement): CanvasLayerSta
     const glow = document.createElement("div");
     glow.className = "app-canvas__glow";
     glow.style.position = "absolute";
-    glow.style.inset = "-20%";
+    glow.style.inset = "0";
     glow.style.pointerEvents = "none";
-    glow.style.opacity = "0.7";
+    glow.style.opacity = "0";
     glow.style.background = "none";
     glow.style.backgroundColor = "transparent";
     /*glow.style.background =
@@ -441,11 +441,13 @@ export const initializeAppCanvasLayer = (container: HTMLElement): CanvasLayerSta
     canvas.style.maxBlockSize = "min(100cqb, 100dvb)";
     canvas.style.opacity = "1";
     canvas.style.mixBlendMode = "normal";
-    canvas.setAttribute("is", "ui-canvas");
+    canvas.style.filter = "none";
+    canvas.style.backdropFilter = "none";
     canvas.style.setProperty("dynamic-range-limit", "no-limit");
-    canvas.style.setProperty("color-space", "display-p3");
+    canvas.style.setProperty("color-space", getCurrentDisplayColorSpace() || "display-p3");
     canvas.style.setProperty("background-color", "transparent", "important");
     canvas.style.setProperty("opacity", "1", "important");
+    canvas.setAttribute("is", "ui-canvas");
 
     // TODO: corrent orientation of poster...
     const poster = document.createElement("img");
@@ -461,7 +463,7 @@ export const initializeAppCanvasLayer = (container: HTMLElement): CanvasLayerSta
     poster.style.objectFit = "cover";
     poster.style.objectPosition = "center";
     poster.style.pointerEvents = "none";
-    root.append(/*poster,*/ glow, canvas);
+    root.append(/*poster,*glow*/ canvas);
     poster.addEventListener("load", () => {
         try {
             document.documentElement.removeAttribute("data-cwsp-wallpaper-poster");
@@ -619,33 +621,36 @@ const getImgHeight = (img)=>{
     return img?.naturalHeight || img?.height || 1;
 }
 
+function getCurrentDisplayColorSpace() {
+    if (window.matchMedia('(color-gamut: rec2020)').matches) {
+        return 'rec2020';
+    } else if (window.matchMedia('(color-gamut: p3)').matches) {
+        return 'display-p3';
+    } else if (window.matchMedia('(color-gamut: srgb)').matches) {
+        return 'srgb';
+    }
+    return 'srgb'; // Fallback standard
+}
+
 /**
  * WHY: Chromium often rejects `rec2100-hlg` / `rec2100-pq` as PredefinedColorSpace.
  * A bare throw aborts ui-canvas init (no ctx, no ResizeObserver) → blank wallpaper.
  * INVARIANT: always return a usable 2d context when the browser allows any.
  */
 const create2dContext = (canvas: HTMLCanvasElement): CanvasRenderingContext2D | null => {
+    const colorSpace = getCurrentDisplayColorSpace() || "display-p3";
     const base: CanvasRenderingContext2DSettings = {
         alpha: true,
         desynchronized: true,
         powerPreference: "high-performance",
         preserveDrawingBuffer: true,
+        colorSpace, colorType: "float16", pixelFormat: "rgba-float16"
     };
+    
     const native =
         typeof document !== "undefined" &&
         document.documentElement?.dataset?.cwspNativeShell === "capacitor";
-    /* PERF: rec2100 probe throws on Android WebView and delays the first context. */
-    const spaces = native
-        ? (["srgb", "display-p3"] as const)
-        : (["rec2100-hlg", "display-p3", "srgb"] as const);
-    for (const colorSpace of spaces) {
-        try {
-            const ctx = canvas.getContext("2d", { ...base, colorSpace });
-            if (ctx) return ctx;
-        } catch {
-            /* unsupported colorSpace enum */
-        }
-    }
+
     try {
         return canvas.getContext("2d", base);
     } catch {
@@ -770,9 +775,15 @@ if (typeof HTMLCanvasElement != "undefined") {
             this.style.setProperty("max-inline-size", "min(100cqi, 100dvi)");
             this.style.setProperty("max-block-size", "min(100cqb, 100dvb)");
             this.style.setProperty("dynamic-range-limit", "no-limit");
-            this.style.setProperty("color-space", "display-p3");
+            this.style.setProperty("color-space", getCurrentDisplayColorSpace() || "display-p3");
             this.style.setProperty("background-color", "transparent", "important");
             this.style.setProperty("opacity", "1", "important");
+            this.style.setProperty("image-rendering", "auto", "important");
+            this.style.setProperty("filter", "none");
+            this.style.setProperty("backdrop-filter", "none");
+            this.style.setProperty("mix-blend-mode", "normal");
+            this.style.setProperty("background-blend-mode", "normal");
+            this.style.setProperty("isolation", "isolate");
 
             //
             this.#size = [ // @ts-ignore
@@ -825,9 +836,15 @@ if (typeof HTMLCanvasElement != "undefined") {
                     this.style.setProperty("max-inline-size", "min(100cqi, 100dvi)");
                     this.style.setProperty("max-block-size", "min(100cqb, 100dvb)");
                     this.style.setProperty("dynamic-range-limit", "no-limit");
-                    this.style.setProperty("color-space", "display-p3");
+                    this.style.setProperty("color-space", getCurrentDisplayColorSpace() || "display-p3");
                     this.style.setProperty("background-color", "transparent", "important");
                     this.style.setProperty("opacity", "1", "important");
+                    this.style.setProperty("image-rendering", "auto", "important");
+                    this.style.setProperty("filter", "none");
+                    this.style.setProperty("backdrop-filter", "none");
+                    this.style.setProperty("mix-blend-mode", "normal");
+                    this.style.setProperty("background-blend-mode", "normal");
+                    this.style.setProperty("isolation", "isolate");
                 } catch(e) {
 
                 }
