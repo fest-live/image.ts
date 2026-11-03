@@ -659,13 +659,15 @@ const create2dContext = (canvas: HTMLCanvasElement): CanvasRenderingContext2D | 
 };
 
 //
+const HALF_PI = 1.5707963267948966192313216916397514420985846996876;
+
+//
 export const callByFrame = (pointerId, cb)=>{ delayed.set(pointerId, cb); }
 export const cover = (ctx, img, scale = 1, port, orient = 0) => {
     const canvas = ctx.canvas;
-    ctx.translate(canvas.width / 2, canvas.height / 2);
-    ctx.rotate((-orient || 0) * (Math.PI * 0.5));
-    ctx.rotate((1 - port) * (Math.PI / 2));
-    ctx.translate(-(getImgWidth(img) / 2) * scale, -(getImgHeight(img) / 2) * scale);
+    ctx.translate(Math.round(canvas.width / 2), Math.round(canvas.height / 2));
+    ctx.rotate(Math.round((-orient || 0) + (1 - port)) * HALF_PI);
+    ctx.translate(Math.round(-(getImgWidth(img) / 2) * scale), Math.round(-(getImgHeight(img) / 2) * scale));
 };
 
 //
@@ -675,14 +677,14 @@ export const createImageBitmapCache = (blob)=>{
         const edge = (() => {
             const dpr = Math.min(globalThis.devicePixelRatio || 1, 2);
             const css = Math.max(globalThis.screen?.width || 0, globalThis.screen?.height || 0, 800);
-            return Math.round(Math.min(1600, css * dpr));
+            return Math.round(Math.max(16, css * dpr));
         })();
         const pending = (async () => {
             if (blob instanceof Blob && blob.size > 180_000) {
                 try {
                     return await createImageBitmap(blob, {
                         resizeWidth: edge,
-                        resizeQuality: "medium"
+                        resizeQuality: "high"
                     });
                 } catch {
                     /* older WebView: full decode */
@@ -921,6 +923,8 @@ if (typeof HTMLCanvasElement != "undefined") {
                 //
                 ctx.save();
                 ctx.clearRect(0, 0, canvas.width, canvas.height); cover(ctx, img, scale, port, (this.#orient ?? currentOrientNumber()) || 0);
+                ctx.imageSmoothingEnabled = true;
+                ctx.imageSmoothingQuality = "high";
                 ctx.drawImage(img, 0, 0, img.width * scale, img.height * scale);
                 ctx.restore();
             }
