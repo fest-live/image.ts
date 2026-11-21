@@ -816,6 +816,14 @@ if (typeof HTMLCanvasElement != "undefined") {
 
             //
             if (!this.#initialized) {
+                /* WHY: measure on the NEXT frame — at synchronous connectedCallback the
+                 * stylesheet/layout is not applied yet, clientWidth reads 0 and the
+                 * canvas would stay a 1px dot until the next orient/resize trigger.
+                 * (Pre-6aca6a8 behavior deferred the whole init through rafYield.) */
+                rafYield?.()?.then?.(() => {
+                    if (!this.isConnected) return;
+                    fixSize();
+                });
                 this.#size = [ // @ts-ignore
                     Math.min(Math.min(Math.max(this.clientWidth || parent?.clientWidth || 1, 1), parent?.clientWidth || 1) * (this.currentCSSZoom || 1), Math.min(screen?.width, globalThis?.screen?.availWidth || screen?.width) || 1) * (devicePixelRatio || 1), // @ts-ignore
                     Math.min(Math.min(Math.max(this.clientHeight || parent?.clientHeight || 1, 1), parent?.clientHeight || 1) * (this.currentCSSZoom || 1), Math.min(screen?.height, globalThis?.screen?.availHeight || screen?.height) || 1) * (devicePixelRatio || 1)
@@ -836,12 +844,17 @@ if (typeof HTMLCanvasElement != "undefined") {
                 //
                 new ResizeObserver((entries) => {
                     for (const entry of entries) {
-                        const box = entry?.devicePixelContentBoxSize?.[0];
+                        /* COMPAT: devicePixelContentBoxSize is missing on older WebViews —
+                         * without a fallback #size never recovers and the wallpaper paints
+                         * only after the next screen-orientation trigger. */
+                        const box = entry?.devicePixelContentBoxSize?.[0]
+                            ?? entry?.contentBoxSize?.[0];
                         if (box) {
                             const old = this.#size;
+                            const dpr = entry?.devicePixelContentBoxSize?.[0] ? 1 : (devicePixelRatio || 1);
                             this.#size = [ // @ts-ignore
-                                Math.max(/*contentBox.inlineSize * devicePixelRatio*/box.inlineSize || this.width, 1),
-                                Math.max(/*contentBox.blockSize  * devicePixelRatio*/box.blockSize || this.height, 1)
+                                Math.max(box.inlineSize * dpr || this.width, 1),
+                                Math.max(box.blockSize * dpr || this.height, 1)
                             ];
                             this.#orient = currentOrientNumber();
                             if (old?.[0] != this.#size[0] || old?.[1] != this.#size[1]) {
