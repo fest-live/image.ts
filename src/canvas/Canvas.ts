@@ -758,58 +758,15 @@ if (typeof HTMLCanvasElement != "undefined") {
         }
 
         //
-        connectedCallback() {
-            const parent: HTMLElement = this.parentNode as HTMLElement;
-            this.style.setProperty("max-inline-size", "min(100cqi, 100dvi)");
-            this.style.setProperty("max-block-size", "min(100cqb, 100dvb)");
-
-            //
-            this.inert = true;
-            this.style.objectFit = "cover";
-            this.style.objectPosition = "center";
-            if (!this.classList.contains("u-canvas")) this.classList.add("u-canvas");
-            if (!this.classList.contains("u2-canvas")) this.classList.add("u2-canvas");
-            if (!this.classList.contains("ui-canvas")) this.classList.add("ui-canvas");
-
-            //
-            this.style.setProperty("inline-size", "min(100cqi, 100dvi)");
-            this.style.setProperty("block-size", "min(100cqb, 100dvb)");
-            this.style.setProperty("max-inline-size", "min(100cqi, 100dvi)");
-            this.style.setProperty("max-block-size", "min(100cqb, 100dvb)");
-            this.style.setProperty("dynamic-range-limit", "no-limit");
-            this.style.setProperty("color-space", getCurrentDisplayColorSpace() || "display-p3");
-            this.style.setProperty("background-color", "transparent", "important");
-            this.style.setProperty("opacity", "1", "important");
-            this.style.setProperty("image-rendering", "auto", "important");
-            this.style.setProperty("filter", "none");
-            this.style.setProperty("backdrop-filter", "none");
-            this.style.setProperty("mix-blend-mode", "normal");
-            this.style.setProperty("background-blend-mode", "normal");
-            this.style.setProperty("isolation", "isolate");
-
-            //
-            this.#size = [ // @ts-ignore
-                Math.min(Math.min(Math.max(this.clientWidth || parent?.clientWidth || 1, 1), parent?.clientWidth || 1) * (this.currentCSSZoom || 1), Math.min(screen?.width, globalThis?.screen?.availWidth || screen?.width) || 1) * (devicePixelRatio || 1), // @ts-ignore
-                Math.min(Math.min(Math.max(this.clientHeight || parent?.clientHeight || 1, 1), parent?.clientHeight || 1) * (this.currentCSSZoom || 1), Math.min(screen?.height, globalThis?.screen?.availHeight || screen?.height) || 1) * (devicePixelRatio || 1)
-            ];
-            this.#preload(this.#loading = this.dataset.src || this.#loading);
-            // WHY: late connect after orient attr was set before CE upgrade — force one paint pass.
-            this.#orient = currentOrientNumber();
-            if (this.image) this.#render(this.#ready);
-        }
-
-        //
-        constructor() {
-            super();
-
-            //
+        #initialized = false;
+        #initialize() {
             const canvas = this as HTMLCanvasElement;
             const parent = this.parentNode as HTMLElement;
 
             //
             const fixSize = () => {
                 const old = this.#size;
-                try { this.#orient = currentOrientNumber(); } catch(e) {};
+                try { this.#orient = currentOrientNumber(); } catch (e) { };
                 this.#size = [ // @ts-ignore
                     Math.min(Math.min(Math.max(this.clientWidth || parent?.clientWidth || 1, 1), parent?.clientWidth || 1) * (this.currentCSSZoom || 1), Math.min(screen?.width, globalThis?.screen?.availWidth || screen?.width) || 1) * (devicePixelRatio || 1), // @ts-ignore
                     Math.min(Math.min(Math.max(this.clientHeight || parent?.clientHeight || 1, 1), parent?.clientHeight || 1) * (this.currentCSSZoom || 1), Math.min(screen?.height, globalThis?.screen?.availHeight || screen?.height) || 1) * (devicePixelRatio || 1)
@@ -822,41 +779,49 @@ if (typeof HTMLCanvasElement != "undefined") {
             }
 
             //
-            rafYield?.()?.then?.(() => {
+            try {
                 //
-                try {
-                    this.inert = true;
-                    this.style.objectFit = "cover";
-                    this.style.objectPosition = "center";
-                    this.classList.add("u-canvas");
-                    this.classList.add("u2-canvas");
-                    this.classList.add("ui-canvas");
+                this.inert = true;
+                this.style.objectFit = "cover";
+                this.style.objectPosition = "center";
+                if (!this.classList.contains("u-canvas")) this.classList.add("u-canvas");
+                if (!this.classList.contains("u2-canvas")) this.classList.add("u2-canvas");
+                if (!this.classList.contains("ui-canvas")) this.classList.add("ui-canvas");
 
-                    //
-                    this.style.setProperty("inline-size", "min(100cqi, 100dvi)");
-                    this.style.setProperty("block-size", "min(100cqb, 100dvb)");
-                    this.style.setProperty("max-inline-size", "min(100cqi, 100dvi)");
-                    this.style.setProperty("max-block-size", "min(100cqb, 100dvb)");
-                    this.style.setProperty("dynamic-range-limit", "no-limit");
-                    this.style.setProperty("color-space", getCurrentDisplayColorSpace() || "display-p3");
-                    this.style.setProperty("background-color", "transparent", "important");
-                    this.style.setProperty("opacity", "1", "important");
-                    this.style.setProperty("image-rendering", "auto", "important");
-                    this.style.setProperty("filter", "none");
-                    this.style.setProperty("backdrop-filter", "none");
-                    this.style.setProperty("mix-blend-mode", "normal");
-                    this.style.setProperty("background-blend-mode", "normal");
-                    this.style.setProperty("isolation", "isolate");
-                } catch(e) {
 
-                }
+                //
+                this.style.setProperty("inline-size", "min(100cqi, 100dvi)");
+                this.style.setProperty("block-size", "min(100cqb, 100dvb)");
+                this.style.setProperty("max-inline-size", "min(100cqi, 100dvi)");
+                this.style.setProperty("max-block-size", "min(100cqb, 100dvb)");
+                this.style.setProperty("dynamic-range-limit", "no-limit");
+                this.style.setProperty("color-space", getCurrentDisplayColorSpace() || "display-p3");
+                this.style.setProperty("background-color", "transparent", "important");
+                this.style.setProperty("opacity", "1", "important");
+                this.style.setProperty("image-rendering", "auto", "important");
+                this.style.setProperty("filter", "none");
+                this.style.setProperty("backdrop-filter", "none");
+                this.style.setProperty("mix-blend-mode", "normal");
+                this.style.setProperty("background-blend-mode", "normal");
+                this.style.setProperty("isolation", "isolate");
+            } catch (e) {
 
-                try {
-                    this.#orient = currentOrientNumber();
-                } catch(e) {
+            }
 
-                }
+            try {
+                this.#orient = currentOrientNumber();
+            } catch (e) {
 
+            }
+
+            //
+            if (!this.#initialized) {
+                this.#size = [ // @ts-ignore
+                    Math.min(Math.min(Math.max(this.clientWidth || parent?.clientWidth || 1, 1), parent?.clientWidth || 1) * (this.currentCSSZoom || 1), Math.min(screen?.width, globalThis?.screen?.availWidth || screen?.width) || 1) * (devicePixelRatio || 1), // @ts-ignore
+                    Math.min(Math.min(Math.max(this.clientHeight || parent?.clientHeight || 1, 1), parent?.clientHeight || 1) * (this.currentCSSZoom || 1), Math.min(screen?.height, globalThis?.screen?.availHeight || screen?.height) || 1) * (devicePixelRatio || 1)
+                ];
+
+                //
                 this.ctx = create2dContext(canvas);
                 try {
                     this.ctx?.configureHighDynamicRange?.({ mode: "extended" });
@@ -887,10 +852,30 @@ if (typeof HTMLCanvasElement != "undefined") {
                 }).observe(this, { box: "device-pixel-content-box" });
 
                 // WHY: data-src / connectedCallback may have finished preload before ctx existed.
-                this.#preload(this.#loading = this.dataset.src || this.#loading);
-                this.#orient = currentOrientNumber();
-                if (this.image) this.#render(this.#ready || this.#loading);
-            });
+                this.#initialized = true;
+            }
+
+            this.#preload(this.#loading = this.dataset.src || this.#loading);
+            // WHY: late connect after orient attr was set before CE upgrade — force one paint pass.
+            this.#orient = currentOrientNumber();
+            if (this.image) this.#render(this.#ready);
+        }
+
+        //
+        adoptedCallback() {
+            this.#initialize();
+            if (this.image) this.#render(this.#ready || this.#loading);
+        }
+
+        //
+        connectedCallback() {
+            this.#initialize();
+            if (this.image) this.#render(this.#ready || this.#loading);
+        }
+
+        //
+        constructor() {
+            super();
         }
 
         //
