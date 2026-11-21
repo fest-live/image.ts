@@ -671,8 +671,23 @@ export const cover = (ctx, img, scale = 1, port, orient = 0) => {
 };
 
 //
+/** WHY: `instanceof` against a missing global throws ReferenceError — a WebView
+ *  without OffscreenCanvas/Image would abort the decode and mark the wallpaper
+ *  as failed (blank canvas). Probe the constructors instead. */
+const isDecodableSource = (blob: any): boolean => {
+    if (!blob) return false;
+    const ctor = (globalThis as any);
+    if (typeof Blob === "function" && blob instanceof Blob) return true;
+    if (typeof File === "function" && blob instanceof File) return true;
+    if (typeof OffscreenCanvas === "function" && blob instanceof OffscreenCanvas) return true;
+    if (typeof ImageBitmap === "function" && blob instanceof ImageBitmap) return true;
+    if (typeof Image === "function" && blob instanceof Image) return true;
+    return typeof blob === "object";
+};
+
+//
 export const createImageBitmapCache = (blob)=>{
-    if (!blobImageMap.has(blob) && (blob instanceof Blob || blob instanceof File || blob instanceof OffscreenCanvas || blob instanceof ImageBitmap || blob instanceof Image)) {
+    if (!blobImageMap.has(blob) && isDecodableSource(blob)) {
         // WHY: do not cache a rejected promise forever — first decode race would stick.
         const edge = (() => {
             const dpr = Math.min(globalThis.devicePixelRatio || 1, 2);
@@ -680,7 +695,7 @@ export const createImageBitmapCache = (blob)=>{
             return Math.round(Math.max(16, css * dpr));
         })();
         const pending = (async () => {
-            if (blob instanceof Blob && blob.size > 180_000) {
+            if (typeof Blob === "function" && blob instanceof Blob && blob.size > 180_000) {
                 try {
                     return await createImageBitmap(blob, {
                         resizeWidth: edge,
@@ -708,12 +723,15 @@ export const bindCache = globalThis[bindCacheSymbol];
 /**
  * WHY: `WeakMap.set` returns the map, not the value — `get() ?? set() ?? bind()` used to
  * schedule the WeakMap itself on the first paint (blank wallpaper until a later #render).
+ * INVARIANT: the cache is keyed per ELEMENT — `$renderPass` lives on the prototype, so a
+ * function-keyed cache would hand the second canvas the FIRST canvas's context and the
+ * visible one would stay blank.
  */
 const bindCached = (cb, ctx) => {
-    const cached = bindCache.get(cb);
+    const cached = bindCache.get(ctx);
     if (typeof cached === "function") return cached;
     const bound = cb.bind(ctx);
-    bindCache.set(cb, bound);
+    bindCache.set(ctx, bound);
     return bound;
 };
 
@@ -842,27 +860,34 @@ if (typeof HTMLCanvasElement != "undefined") {
                 fixSize();
 
                 //
-                new ResizeObserver((entries) => {
-                    for (const entry of entries) {
-                        /* COMPAT: devicePixelContentBoxSize is missing on older WebViews —
-                         * without a fallback #size never recovers and the wallpaper paints
-                         * only after the next screen-orientation trigger. */
-                        const box = entry?.devicePixelContentBoxSize?.[0]
-                            ?? entry?.contentBoxSize?.[0];
-                        if (box) {
-                            const old = this.#size;
-                            const dpr = entry?.devicePixelContentBoxSize?.[0] ? 1 : (devicePixelRatio || 1);
-                            this.#size = [ // @ts-ignore
-                                Math.max(box.inlineSize * dpr || this.width, 1),
-                                Math.max(box.blockSize * dpr || this.height, 1)
-                            ];
-                            this.#orient = currentOrientNumber();
-                            if (old?.[0] != this.#size[0] || old?.[1] != this.#size[1]) {
-                                this.#render(this.#ready);
+                /* COMPAT: a missing/failing ResizeObserver must not abort the rest
+                 * of the init — otherwise the canvas keeps a 1px box and the
+                 * wallpaper stays invisible with no error in the console. */
+                try {
+                    new ResizeObserver((entries) => {
+                        for (const entry of entries) {
+                            /* COMPAT: devicePixelContentBoxSize is missing on older WebViews —
+                             * without a fallback #size never recovers and the wallpaper paints
+                             * only after the next screen-orientation trigger. */
+                            const box = entry?.devicePixelContentBoxSize?.[0]
+                                ?? entry?.contentBoxSize?.[0];
+                            if (box) {
+                                const old = this.#size;
+                                const dpr = entry?.devicePixelContentBoxSize?.[0] ? 1 : (devicePixelRatio || 1);
+                                this.#size = [ // @ts-ignore
+                                    Math.max(box.inlineSize * dpr || this.width, 1),
+                                    Math.max(box.blockSize * dpr || this.height, 1)
+                                ];
+                                this.#orient = currentOrientNumber();
+                                if (old?.[0] != this.#size[0] || old?.[1] != this.#size[1]) {
+                                    this.#render(this.#ready);
+                                }
                             }
                         }
-                    }
-                }).observe(this, { box: "device-pixel-content-box" });
+                    }).observe(this, { box: "device-pixel-content-box" });
+                } catch (err) {
+                    console.warn("[ui-canvas] ResizeObserver unavailable:", err);
+                }
 
                 // WHY: data-src / connectedCallback may have finished preload before ctx existed.
                 this.#initialized = true;
@@ -894,7 +919,7 @@ if (typeof HTMLCanvasElement != "undefined") {
         //
         async $useImageAsSource(blob, ready?: any | null) {
             ready ||= this.#loading;
-            const img = (blob instanceof ImageBitmap) ? blob : (await createImageBitmapCache(blob).catch(console.warn.bind(console)));
+            const img = (typeof ImageBitmap === "function" && blob instanceof ImageBitmap) ? blob : (await createImageBitmapCache(blob).catch(console.warn.bind(console)));
             if (img && ready == this.#loading) { this.image = img; this.#render(ready); }
             return blob;
         }
@@ -902,7 +927,10 @@ if (typeof HTMLCanvasElement != "undefined") {
         //
         $renderPass(whatIsReady?: File | Blob | string) {
             const canvas = this, ctx = this.ctx, img = this.image;
-            if (img && ctx && (whatIsReady == this.#loading || !whatIsReady)) {
+            /* WHY: `whatIsReady` must be the payload id, not the rafYield resolution
+             * value (rAF resolves with a timestamp number → the guard below would
+             * reject the pass and the canvas would stay blank). */
+            if (img && ctx && (whatIsReady == null || whatIsReady == this.#loading || whatIsReady == this.#ready)) {
                 if (whatIsReady) { this.#ready = whatIsReady; };
                 if (this.width != this.#size[0]) { this.width = this.#size[0]; };
                 if (this.height != this.#size[1]) { this.height = this.#size[1]; };
@@ -969,7 +997,11 @@ if (typeof HTMLCanvasElement != "undefined") {
         }
         #render(whatIsReady?: File | Blob | string) {
             const ctx = this.ctx, img = this.image;
-            if (img && ctx && (whatIsReady == this.#loading || !whatIsReady)) { rafYield?.()?.then?.(bindCached(this.$renderPass, this)); }
+            /* WHY: pass the payload id explicitly — `.then(fn)` would forward the
+             * rafYield resolution value (rAF timestamp) as `whatIsReady`. */
+            if (img && ctx && (whatIsReady == null || whatIsReady == this.#loading || whatIsReady == this.#ready)) {
+                rafYield?.()?.then?.(() => bindCached(this.$renderPass, this)(whatIsReady));
+            }
         }
     }
 } else {
