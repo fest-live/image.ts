@@ -529,6 +529,98 @@ export const initializeAppCanvasLayer = (container: HTMLElement): CanvasLayerSta
     return { root, canvas, glow, disposeOrient };
 };
 
+const WALLPAPER_LAYOUT_KEY = "rs-wallpaper-layout";
+const APP_WALLPAPER_CANVAS_SELECTOR =
+    '[data-app-layer="canvas"] canvas[is="ui-canvas"], ' +
+    '[data-app-layer="canvas"] canvas.ui-canvas';
+
+export type WallpaperPosition = "start" | "center" | "end" | `${number}%`;
+
+export type WallpaperLayout = {
+    scale: number;
+    positionX: WallpaperPosition;
+    positionY: WallpaperPosition;
+};
+
+const normalizeWallpaperScale = (raw: unknown): number => {
+    const value = typeof raw === "number"
+        ? raw
+        : typeof raw === "string"
+            ? Number(raw.trim().toLowerCase().replace(/x$/, ""))
+            : NaN;
+
+    return Number.isFinite(value) && value > 0 ? value : 1;
+};
+
+const normalizeWallpaperPosition = (raw: unknown): WallpaperPosition => {
+    const value = typeof raw === "string" ? raw.trim().toLowerCase() : "";
+    if (value === "start" || value === "center" || value === "end") return value;
+
+    if (/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)%$/.test(value)) {
+        const percent = Number(value.slice(0, -1));
+        if (Number.isFinite(percent)) {
+            return `${Math.max(0, Math.min(100, percent))}%`;
+        }
+    }
+
+    return "center";
+};
+
+const wallpaperPositionRatio = (raw: string | null): number => {
+    const position = normalizeWallpaperPosition(raw);
+    if (position === "start") return 0;
+    if (position === "center") return 0.5;
+    if (position === "end") return 1;
+    return Number(position.slice(0, -1)) / 100;
+};
+
+const normalizeWallpaperLayout = (
+    layout?: Partial<WallpaperLayout> | null
+): WallpaperLayout => ({
+    scale: normalizeWallpaperScale(layout?.scale || 1),
+    positionX: normalizeWallpaperPosition(layout?.positionX ?? "center"),
+    positionY: normalizeWallpaperPosition(layout?.positionY ?? "center")
+});
+
+let sessionWallpaperLayout: WallpaperLayout | undefined;
+
+export const getAppWallpaperLayout = (): WallpaperLayout => {
+    if (sessionWallpaperLayout) return { ...sessionWallpaperLayout };
+    try {
+        return normalizeWallpaperLayout(
+            JSON.parse(localStorage.getItem(WALLPAPER_LAYOUT_KEY) ?? "null")
+        );
+    } catch {
+        return normalizeWallpaperLayout();
+    }
+};
+
+const applyWallpaperLayout = (
+    canvas: HTMLCanvasElement,
+    layout: WallpaperLayout
+): void => {
+    canvas.setAttribute("scale", String(layout.scale));
+    canvas.setAttribute("position-x", layout.positionX);
+    canvas.setAttribute("position-y", layout.positionY);
+};
+
+export const setAppWallpaperLayout = (patch: Partial<WallpaperLayout>): void => {
+    const layout = normalizeWallpaperLayout({ ...getAppWallpaperLayout(), ...patch });
+    sessionWallpaperLayout = layout;
+
+    try {
+        localStorage.setItem(WALLPAPER_LAYOUT_KEY, JSON.stringify(layout));
+    } catch {
+        // Настройки продолжат работать в текущей сессии.
+    }
+
+    if (typeof document !== "undefined") {
+        document
+            .querySelectorAll<HTMLCanvasElement>(APP_WALLPAPER_CANVAS_SELECTOR)
+            .forEach((canvas) => applyWallpaperLayout(canvas, layout));
+    }
+};
+
 /**
  * Set wallpaper from a URL. Short asset paths stay in localStorage; `data:` / `blob:` /
  * oversized payloads are persisted to IndexedDB with {@link WALLPAPER_IDB_MARKER}.
@@ -748,7 +840,9 @@ let UICanvas: any = null;
 if (typeof HTMLCanvasElement != "undefined") {
     UICanvas = class UICanvas extends HTMLCanvasElement {
         /* COMPAT: `fixOrientToScreen` / hosts may set `orient`; SpeedDial / Canvas-2 use `data-orient`. */
-        static observedAttributes = ["data-src", "data-orient", "orient"];
+        static observedAttributes = [
+            "data-src", "data-orient", "orient", "scale", "position-x", "position-y"
+        ];
 
         //
         ctx: CanvasRenderingContext2D | null = null;
@@ -769,10 +863,18 @@ if (typeof HTMLCanvasElement != "undefined") {
             this.setAttribute("orient", s);
         }
 
-        //
-        attributeChangedCallback(name, _, newValue) {
-            if (name == "data-src") { this.#preload(newValue); };
-            if (name == "data-orient" || name == "orient") { this.#render(this.#ready); };
+
+        attributeChangedCallback(
+            name: string,
+            oldValue: string | null,
+            newValue: string | null
+        ): void {
+            if (name === "data-src") {
+                this.#preload(newValue);
+                return;
+            }
+
+            if (oldValue !== newValue) this.#render(this.#ready);
         }
 
         //
@@ -940,19 +1042,51 @@ if (typeof HTMLCanvasElement != "undefined") {
 
                 //
                 const ox = (((this.#orient ?? currentOrientNumber()) || 0) % 2);
-                const port = getImgWidth(img) <= getImgHeight(img) ? 1 : 0;
-                const scale = Math.max(
+                /*const scale = Math.max(
                     canvas[["height", "width"][ox]] / (port ? getImgHeight(img) : getImgWidth(img)),
                     canvas[["width", "height"][ox]] / (port ? getImgWidth(img) : getImgHeight(img))
-                );
+                );*/
 
                 //
+                const imgWidth = getImgWidth(img);
+                const imgHeight = getImgHeight(img);
+                const port = imgWidth <= imgHeight ? 1 : 0;
+                const turns = Math.round(1 - port - (this.#orient ?? currentOrientNumber()));
+                const swapsAxes = Math.abs(turns % 2) === 1;
+
+                const rotatedWidth = swapsAxes ? imgHeight : imgWidth;
+                const rotatedHeight = swapsAxes ? imgWidth : imgHeight;
+                const coverScale = Math.max(
+                    canvas.width / rotatedWidth,
+                    canvas.height / rotatedHeight
+                );
+                const scale = coverScale * normalizeWallpaperScale(this.getAttribute("scale"));
+
+                const drawWidth  = imgWidth  * scale;
+                const drawHeight = imgHeight * scale;
+                if (!Number.isFinite(drawWidth) || !Number.isFinite(drawHeight)) return;
+
+                const boundsWidth = swapsAxes ? drawHeight : drawWidth;
+                const boundsHeight = swapsAxes ? drawWidth : drawHeight;
+                const x = wallpaperPositionRatio(this.getAttribute("position-x"));
+                const y = wallpaperPositionRatio(this.getAttribute("position-y"));
+
+                // Процент применяется к разнице между размером канваса и изображения,
+                // как у CSS object-position, а не к ширине или высоте самого канваса.
+                const left = (canvas.width - boundsWidth) * x;
+                const top = (canvas.height - boundsHeight) * y;
+
                 ctx.save();
-                ctx.clearRect(0, 0, canvas.width, canvas.height); cover(ctx, img, scale, port, (this.#orient ?? currentOrientNumber()) || 0);
-                ctx.imageSmoothingEnabled = true;
-                ctx.imageSmoothingQuality = "high";
-                ctx.drawImage(img, 0, 0, img.width * scale, img.height * scale);
-                ctx.restore();
+                try {
+                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+                    ctx.translate(left + boundsWidth / 2, top + boundsHeight / 2);
+                    ctx.rotate(turns * HALF_PI);
+                    ctx.imageSmoothingEnabled = true;
+                    ctx.imageSmoothingQuality = "high";
+                    ctx.drawImage(img, -drawWidth / 2, -drawHeight / 2, drawWidth, drawHeight);
+                } finally {
+                    ctx.restore();
+                }
             }
         }
 
