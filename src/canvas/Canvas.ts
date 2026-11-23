@@ -1,9 +1,11 @@
 /*
  * Filename: Canvas.ts
  * FullPath: modules/projects/image.ts/src/canvas/Canvas.ts
- * Change date and time: 23.10.00_23.08.2026
+ * Change date and time: 20.30.00_23.11.2026
  * FIND:wallpaper-boot
- * Reason for changes: Skip 404 wallpaper fetch/decode — CRX missing /assets/wallpaper.jpg threw on open.
+ * TAG:wallpaper-layout
+ * Reason for changes: Stored wallpaper framing (scale/position) applies on cold boot and
+ * non-canvas-layer hosts; layout sync helper for the interactive WallpaperComposer.
  */
 import { makeRAFCycle } from "@fest-lib/dom";
 
@@ -501,6 +503,9 @@ export const initializeAppCanvasLayer = (container: HTMLElement): CanvasLayerSta
         if (!poster.getAttribute("src")) poster.src = warm.url;
     });
     const disposeOrient = syncCanvasOrient(canvas);
+    /* WHY: paint the stored framing immediately (attrs, not the module cache) —
+     * the canvas re-renders on each attr change. */
+    applyWallpaperLayout(canvas, getAppWallpaperLayout());
 
     /* Cold paint: restore last seeds, then re-extract from current wallpaper. */
     restoreWallpaperThemeCache();
@@ -584,6 +589,50 @@ const normalizeWallpaperLayout = (
 
 let sessionWallpaperLayout: WallpaperLayout | undefined;
 
+/**
+ * Cached `scale` / `position-x` / `position-y` fallbacks for `ui-canvas` hosts that
+ * never receive explicit layout attrs (SpeedDial backdrop, window-frame canvases).
+ * INVARIANT: written only by {@link readStoredWallpaperLayout} /
+ * {@link syncWallpaperLayoutAttrs} — keep in lockstep with `rs-wallpaper-layout`
+ * in localStorage (single writer: {@link setAppWallpaperLayout}).
+ */
+let defaultWallpaperLayoutAttrs: { scale: string; "position-x": string; "position-y": string } = {
+    scale: "1",
+    "position-x": "center",
+    "position-y": "center"
+};
+
+const readStoredWallpaperLayout = (): void => {
+    try {
+        const raw = JSON.parse(localStorage.getItem(WALLPAPER_LAYOUT_KEY) ?? "null");
+        if (!raw || typeof raw !== "object") return;
+        defaultWallpaperLayoutAttrs = {
+            scale: String(normalizeWallpaperScale((raw as any).scale)),
+            "position-x": normalizeWallpaperPosition((raw as any).positionX ?? "center"),
+            "position-y": normalizeWallpaperPosition((raw as any).positionY ?? "center")
+        };
+    } catch {
+        /* keep defaults */
+    }
+};
+
+/** Push the current layout to the attr cache and every live app-canvas. */
+export const syncWallpaperLayoutAttrs = (): void => {
+    const layout = getAppWallpaperLayout();
+    defaultWallpaperLayoutAttrs = {
+        scale: String(layout.scale),
+        "position-x": layout.positionX,
+        "position-y": layout.positionY
+    };
+    if (typeof document === "undefined") return;
+    document
+        .querySelectorAll<HTMLCanvasElement>(APP_WALLPAPER_CANVAS_SELECTOR)
+        .forEach((canvas) => applyWallpaperLayout(canvas, layout));
+};
+
+/* WHY: the stored framing must be known before any canvas paints (cold boot). */
+readStoredWallpaperLayout();
+
 export const getAppWallpaperLayout = (): WallpaperLayout => {
     if (sessionWallpaperLayout) return { ...sessionWallpaperLayout };
     try {
@@ -614,11 +663,7 @@ export const setAppWallpaperLayout = (patch: Partial<WallpaperLayout>): void => 
         // Настройки продолжат работать в текущей сессии.
     }
 
-    if (typeof document !== "undefined") {
-        document
-            .querySelectorAll<HTMLCanvasElement>(APP_WALLPAPER_CANVAS_SELECTOR)
-            .forEach((canvas) => applyWallpaperLayout(canvas, layout));
-    }
+    syncWallpaperLayoutAttrs();
 };
 
 /**
@@ -1060,7 +1105,13 @@ if (typeof HTMLCanvasElement != "undefined") {
                     canvas.width / rotatedWidth,
                     canvas.height / rotatedHeight
                 );
-                const scale = coverScale * normalizeWallpaperScale(this.getAttribute("scale"));
+                /* WHY: SpeedDial / window-frame hosts paint plain `ui-canvas` without layout
+                 * attrs; the stored framing must still apply (Canvas-layer canvases get
+                 * explicit attrs via {@link applyWallpaperLayout}, others fall back here). */
+                const layoutAttr = (name: "scale" | "position-x" | "position-y"): string | null =>
+                    this.getAttribute(name) ?? defaultWallpaperLayoutAttrs[name];
+
+                const scale = coverScale * normalizeWallpaperScale(layoutAttr("scale"));
 
                 const drawWidth  = imgWidth  * scale;
                 const drawHeight = imgHeight * scale;
@@ -1068,8 +1119,8 @@ if (typeof HTMLCanvasElement != "undefined") {
 
                 const boundsWidth = swapsAxes ? drawHeight : drawWidth;
                 const boundsHeight = swapsAxes ? drawWidth : drawHeight;
-                const x = wallpaperPositionRatio(this.getAttribute("position-x"));
-                const y = wallpaperPositionRatio(this.getAttribute("position-y"));
+                const x = wallpaperPositionRatio(layoutAttr("position-x"));
+                const y = wallpaperPositionRatio(layoutAttr("position-y"));
 
                 // Процент применяется к разнице между размером канваса и изображения,
                 // как у CSS object-position, а не к ширине или высоте самого канваса.
